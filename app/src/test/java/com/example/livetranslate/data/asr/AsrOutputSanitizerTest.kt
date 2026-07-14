@@ -20,8 +20,8 @@ class AsrOutputSanitizerTest {
     }
 
     @Test
-    fun stripsClosingAndIsoLanguageTags() {
-        val raw = "<en>Hi</en> there <zh-CN>好"
+    fun stripsAnyEnglishLetterTags() {
+        val raw = "<foo>Hi</bar> there <zh-CN>好 <CustomTag>"
         assertEquals("Hi there 好", AsrOutputSanitizer.clean(raw))
     }
 
@@ -37,8 +37,8 @@ class AsrOutputSanitizerTest {
     }
 
     @Test
-    fun doesNotStripArbitraryAngleWords() {
-        // Not a known language token — leave alone
-        assertEquals("<foo> bar", AsrOutputSanitizer.clean("<foo> bar"))
+    fun doesNotStripNonAsciiTagNames() {
+        // Tag name is not pure English letters pattern start — leave as-is
+        assertEquals("<中文> bar", AsrOutputSanitizer.clean("<中文> bar"))
     }
 }

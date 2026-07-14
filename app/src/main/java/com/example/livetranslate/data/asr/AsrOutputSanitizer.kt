@@ -5,8 +5,8 @@ package com.example.livetranslate.data.asr
  *
  * Removes:
  * - think blocks: `<think>...</think>`, bare `think>` lines, etc.
- * - language marker tags like `<chinese>`, `<english>`, `</zh>`, `<en-US>`
- *   (not the Chinese word 语言)
+ * - Any angle-bracket tag whose name is English letters (optionally + digits/_/-),
+ *   e.g. `<chinese>`, `<english>`, `<en>`, `<zh-CN>`, `</English>`
  */
 object AsrOutputSanitizer {
 
@@ -25,20 +25,12 @@ object AsrOutputSanitizer {
     )
 
     /**
-     * Language name / ISO code tags, e.g. `<chinese>`, `</English>`, `<en>`, `<zh-CN>`.
-     * Deliberately limited to known language tokens so we do not strip arbitrary XML.
+     * Tags whose name is English letters only (ASCII), optional digits / _ / - after first letter.
+     * Examples: `<chinese>`, `</en>`, `<zh-CN>`, `<English>`
+     * Does not match Chinese names or attributes (`<a href=...>` is not a simple tag name).
      */
-    private val languageNames = listOf(
-        "chinese", "english", "japanese", "korean", "french", "german", "spanish",
-        "russian", "arabic", "portuguese", "italian", "hindi", "vietnamese", "thai",
-        "indonesian", "malay", "dutch", "turkish", "polish", "ukrainian", "swedish",
-        "norwegian", "danish", "finnish", "czech", "romanian", "hungarian", "greek",
-        "hebrew", "persian", "bengali", "tamil", "telugu", "marathi", "urdu",
-        "cantonese", "mandarin"
-    ).joinToString("|")
-
-    private val languageTag = Regex(
-        """(?i)</?\s*(?:$languageNames|[a-z]{2}(?:[-_][a-z]{2,8})?)\s*>"""
+    private val englishNameTag = Regex(
+        """(?i)</?[a-z][a-z0-9_-]*>"""
     )
 
     fun clean(raw: String): String {
@@ -48,7 +40,7 @@ object AsrOutputSanitizer {
         s = thinkOpenToEnd.replace(s, "")
         s = thinkLine.replace(s, "")
         s = thinkLoose.replace(s, "")
-        s = languageTag.replace(s, "")
+        s = englishNameTag.replace(s, "")
         // Collapse leftover blank lines / spaces from removed tags
         s = s.replace(Regex("[\\t ]+"), " ")
         s = s.replace(Regex(" *\\n *"), "\n")
