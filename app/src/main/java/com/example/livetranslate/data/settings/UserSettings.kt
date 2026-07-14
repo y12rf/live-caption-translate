@@ -24,10 +24,10 @@ data class UserSettings(
     val inputLanguage: String = "en",
     val outputLanguage: String = "zh",
     // More aggressive segmentation defaults (shorter silence / max span → cut sooner)
-    val silenceMs: Int = 300,
-    val maxUtteranceMs: Int = 6_000,
+    val silenceMs: Int = 200,
+    val maxUtteranceMs: Int = 4_000,
     val minUtteranceMs: Int = 200,
-    val energyThreshold: Double = 400.0,
+    val energyThreshold: Double = 350.0,
     val contextWindowSize: Int = 4
 ) {
     fun normalizedAsrBaseUrl(): String = normalizeBaseUrl(asrBaseUrl)
