@@ -35,7 +35,14 @@ class LlmClientTest {
             val events = client.translateStream(
                 "hello",
                 emptyList(),
-                LlmConfig(base, "key", "gpt-4o-mini", "zh")
+                LlmConfig(
+                    baseUrl = base,
+                    apiKey = "key",
+                    model = "gpt-4o-mini",
+                    targetLanguage = "zh",
+                    sourceLanguage = "en",
+                    systemPrompt = "你是一位精通 {{to}} 专业母语译者，致力于提供流畅、地道、符合表达习惯且高保真的翻译。"
+                )
             ).toList()
             val pieces = events.filterIsInstance<LlmStreamEvent.Delta>().map { it.text }
             assertEquals(listOf("你", "好"), pieces)

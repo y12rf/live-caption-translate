@@ -22,6 +22,7 @@ class SettingsRepository(private val context: Context) {
         val llmBaseUrl = stringPreferencesKey("llm_base_url")
         val llmApiKey = stringPreferencesKey("llm_api_key")
         val llmModel = stringPreferencesKey("llm_model")
+        val llmSystemPrompt = stringPreferencesKey("llm_system_prompt")
         val inputLanguage = stringPreferencesKey("input_language")
         val outputLanguage = stringPreferencesKey("output_language")
         val silenceMs = intPreferencesKey("silence_ms")
@@ -40,6 +41,7 @@ class SettingsRepository(private val context: Context) {
             llmBaseUrl = p[Keys.llmBaseUrl] ?: defaults.llmBaseUrl,
             llmApiKey = p[Keys.llmApiKey] ?: defaults.llmApiKey,
             llmModel = p[Keys.llmModel] ?: defaults.llmModel,
+            llmSystemPrompt = p[Keys.llmSystemPrompt] ?: defaults.llmSystemPrompt,
             inputLanguage = p[Keys.inputLanguage] ?: defaults.inputLanguage,
             outputLanguage = p[Keys.outputLanguage] ?: defaults.outputLanguage,
             silenceMs = p[Keys.silenceMs] ?: defaults.silenceMs,
@@ -60,6 +62,8 @@ class SettingsRepository(private val context: Context) {
                 llmBaseUrl = prefs[Keys.llmBaseUrl] ?: UserSettings().llmBaseUrl,
                 llmApiKey = prefs[Keys.llmApiKey] ?: "",
                 llmModel = prefs[Keys.llmModel] ?: UserSettings().llmModel,
+                llmSystemPrompt = prefs[Keys.llmSystemPrompt]
+                    ?: UserSettings().llmSystemPrompt,
                 inputLanguage = prefs[Keys.inputLanguage] ?: UserSettings().inputLanguage,
                 outputLanguage = prefs[Keys.outputLanguage] ?: UserSettings().outputLanguage,
                 silenceMs = prefs[Keys.silenceMs] ?: UserSettings().silenceMs,
@@ -75,6 +79,9 @@ class SettingsRepository(private val context: Context) {
             prefs[Keys.llmBaseUrl] = UserSettings.normalizeBaseUrl(next.llmBaseUrl)
             prefs[Keys.llmApiKey] = next.llmApiKey
             prefs[Keys.llmModel] = next.llmModel
+            prefs[Keys.llmSystemPrompt] = next.llmSystemPrompt.ifBlank {
+                UserSettings.DEFAULT_LLM_SYSTEM_PROMPT
+            }
             prefs[Keys.inputLanguage] = next.inputLanguage
             prefs[Keys.outputLanguage] = next.outputLanguage
             prefs[Keys.silenceMs] = next.silenceMs

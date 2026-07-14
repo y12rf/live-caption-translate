@@ -234,7 +234,9 @@ class SessionOrchestrator(
                 baseUrl = settings.normalizedLlmBaseUrl(),
                 apiKey = settings.llmApiKey,
                 model = settings.llmModel,
-                targetLanguage = settings.outputLanguage
+                targetLanguage = settings.outputLanguage,
+                sourceLanguage = settings.inputLanguage,
+                systemPrompt = settings.renderLlmSystemPrompt()
             )
         ).collect { ev ->
             when (ev) {

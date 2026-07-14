@@ -14,6 +14,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
@@ -23,6 +24,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.example.livetranslate.data.settings.UserSettings
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -73,6 +75,27 @@ fun SettingsScreen(
             }
             field("Model", d.llmModel) {
                 viewModel.updateDraft { s -> s.copy(llmModel = it) }
+            }
+            multilineField(
+                label = "Translation system prompt",
+                value = d.llmSystemPrompt,
+                onChange = { viewModel.updateDraft { s -> s.copy(llmSystemPrompt = it) } }
+            )
+            Text(
+                text = "Placeholders: {{to}} = output language, {{from}} = input language",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(bottom = 4.dp)
+            )
+            Button(
+                onClick = {
+                    viewModel.updateDraft { s ->
+                        s.copy(llmSystemPrompt = UserSettings.DEFAULT_LLM_SYSTEM_PROMPT)
+                    }
+                },
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Text("Reset prompt to default")
             }
 
             Spacer(Modifier.height(16.dp))
@@ -135,5 +158,21 @@ private fun field(label: String, value: String, onChange: (String) -> Unit) {
             .fillMaxWidth()
             .padding(vertical = 4.dp),
         singleLine = true
+    )
+}
+
+@Composable
+private fun multilineField(label: String, value: String, onChange: (String) -> Unit) {
+    OutlinedTextField(
+        value = value,
+        onValueChange = onChange,
+        label = { Text(label) },
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 4.dp)
+            .height(140.dp),
+        singleLine = false,
+        minLines = 4,
+        maxLines = 10
     )
 }

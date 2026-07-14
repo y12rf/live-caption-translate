@@ -39,17 +39,25 @@ class LlmClient(
             }
         }
 
-        val system = buildString {
-            append("You are a simultaneous interpreter for lecture notes. ")
-            append("Translate the user's English into ")
-            append(config.targetLanguage)
-            append(". Output only the translation for the CURRENT utterance. ")
-            append("Do not re-translate history. Use history only for terminology consistency.")
-        }
+        // Customizable system prompt from settings; support {{to}} / {{from}}.
+        val system = config.systemPrompt
+            .replace("{{to}}", config.targetLanguage)
+            .replace("{{from}}", config.sourceLanguage)
+            .ifBlank {
+                "你是一位精通 ${config.targetLanguage} 专业母语译者，致力于提供流畅、地道、符合表达习惯且高保真的翻译。"
+            }
+
         val user = buildString {
+            append("请将当前句从 ")
+            append(config.sourceLanguage)
+            append(" 译为 ")
+            append(config.targetLanguage)
+            append("。只输出当前句译文，不要重译历史；历史仅供术语与指代一致。\n\n")
             append("History:\n")
             append(historyBlock)
-            append("\n\nCurrent EN:\n")
+            append("\n\nCurrent (")
+            append(config.sourceLanguage)
+            append("):\n")
             append(sourceText)
         }
 

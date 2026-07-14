@@ -7,6 +7,12 @@ data class UserSettings(
     val llmBaseUrl: String = "https://api.openai.com",
     val llmApiKey: String = "",
     val llmModel: String = "gpt-4o-mini",
+    /**
+     * LLM system prompt template. Placeholders:
+     * - `{{to}}` → output language (e.g. zh / Chinese)
+     * - `{{from}}` → input language (e.g. en / English)
+     */
+    val llmSystemPrompt: String = DEFAULT_LLM_SYSTEM_PROMPT,
     val inputLanguage: String = "en",
     val outputLanguage: String = "zh",
     val silenceMs: Int = 500,
@@ -18,7 +24,15 @@ data class UserSettings(
     fun normalizedAsrBaseUrl(): String = normalizeBaseUrl(asrBaseUrl)
     fun normalizedLlmBaseUrl(): String = normalizeBaseUrl(llmBaseUrl)
 
+    fun renderLlmSystemPrompt(): String =
+        llmSystemPrompt
+            .replace("{{to}}", outputLanguage)
+            .replace("{{from}}", inputLanguage)
+
     companion object {
+        const val DEFAULT_LLM_SYSTEM_PROMPT: String =
+            "你是一位精通 {{to}} 专业母语译者，致力于提供流畅、地道、符合表达习惯且高保真的翻译。"
+
         fun normalizeBaseUrl(url: String): String = url.trim().trimEnd('/')
     }
 }
