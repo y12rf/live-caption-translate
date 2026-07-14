@@ -11,10 +11,14 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.ExposedDropdownMenuBox
+import androidx.compose.material3.ExposedDropdownMenuDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.OutlinedTextField
@@ -108,47 +112,33 @@ fun SettingsScreen(
                 value = d.asrModel,
                 onChange = { viewModel.updateDraft { s -> s.copy(asrModel = it) } }
             )
-            field(
+            dropdownField(
                 label = "ASR style",
                 value = d.asrApiStyle,
-                onChange = { viewModel.updateDraft { s -> s.copy(asrApiStyle = it.trim()) } },
+                options = AsrApiStyle.entries.map { it.name },
+                onSelect = { viewModel.updateDraft { s -> s.copy(asrApiStyle = it) } },
                 onInfo = {
                     showInfo(
                         "ASR style",
-                        "取值：\n" +
-                            "• OpenAiTranscriptions — multipart 上传 WAV（经典 Whisper）\n" +
+                        "• OpenAiTranscriptions — multipart 上传 WAV（经典 Whisper）\n" +
                             "• ChatCompletionsAudio — chat + base64 input_audio（如 MIMO）\n\n" +
                             "只影响请求体格式，与 URL 解析规则无关。"
                     )
                 }
             )
-            field(
+            dropdownField(
                 label = "ASR auth",
                 value = d.asrAuthStyle,
-                onChange = { viewModel.updateDraft { s -> s.copy(asrAuthStyle = it.trim()) } },
+                options = ApiAuthStyle.entries.map { it.name },
+                onSelect = { viewModel.updateDraft { s -> s.copy(asrAuthStyle = it) } },
                 onInfo = {
                     showInfo(
                         "ASR auth",
-                        "取值：\n" +
-                            "• Bearer — Authorization: Bearer <key>\n" +
+                        "• Bearer — Authorization: Bearer <key>\n" +
                             "• ApiKeyHeader — api-key: <key>（如小米 MIMO）"
                     )
                 }
             )
-            Button(
-                onClick = {
-                    viewModel.updateDraft { s ->
-                        s.copy(
-                            asrBaseUrl = "https://api.xiaomimimo.com/v1/chat/completions",
-                            asrModel = "mimo-v2.5-asr",
-                            asrApiStyle = AsrApiStyle.ChatCompletionsAudio.name,
-                            asrAuthStyle = ApiAuthStyle.ApiKeyHeader.name,
-                            inputLanguage = "auto"
-                        )
-                    }
-                },
-                modifier = Modifier.fillMaxWidth()
-            ) { Text("Fill MIMO ASR defaults") }
 
             Spacer(Modifier.height(16.dp))
             sectionTitle("LLM")
@@ -174,15 +164,15 @@ fun SettingsScreen(
                 value = d.llmModel,
                 onChange = { viewModel.updateDraft { s -> s.copy(llmModel = it) } }
             )
-            field(
+            dropdownField(
                 label = "LLM auth",
                 value = d.llmAuthStyle,
-                onChange = { viewModel.updateDraft { s -> s.copy(llmAuthStyle = it.trim()) } },
+                options = ApiAuthStyle.entries.map { it.name },
+                onSelect = { viewModel.updateDraft { s -> s.copy(llmAuthStyle = it) } },
                 onInfo = {
                     showInfo(
                         "LLM auth",
-                        "取值：\n" +
-                            "• Bearer — Authorization: Bearer <key>\n" +
+                        "• Bearer — Authorization: Bearer <key>\n" +
                             "• ApiKeyHeader — api-key: <key>"
                     )
                 }
@@ -318,6 +308,63 @@ private fun InfoButton(onClick: () -> Unit) {
             imageVector = Icons.Outlined.Info,
             contentDescription = "Info"
         )
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun dropdownField(
+    label: String,
+    value: String,
+    options: List<String>,
+    onSelect: (String) -> Unit,
+    onInfo: (() -> Unit)? = null
+) {
+    var expanded by remember { mutableStateOf(false) }
+    // Keep display valid even if stored value is unknown
+    val display = if (options.contains(value)) value else (options.firstOrNull() ?: value)
+
+    ExposedDropdownMenuBox(
+        expanded = expanded,
+        onExpandedChange = { expanded = it },
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 4.dp)
+    ) {
+        OutlinedTextField(
+            value = display,
+            onValueChange = {},
+            readOnly = true,
+            label = { Text(label) },
+            trailingIcon = {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    if (onInfo != null) {
+                        IconButton(onClick = onInfo) {
+                            Icon(Icons.Outlined.Info, contentDescription = "Info")
+                        }
+                    }
+                    Icon(Icons.Filled.ArrowDropDown, contentDescription = "Expand")
+                }
+            },
+            modifier = Modifier
+                .menuAnchor()
+                .fillMaxWidth(),
+            colors = ExposedDropdownMenuDefaults.outlinedTextFieldColors()
+        )
+        ExposedDropdownMenu(
+            expanded = expanded,
+            onDismissRequest = { expanded = false }
+        ) {
+            options.forEach { option ->
+                DropdownMenuItem(
+                    text = { Text(option) },
+                    onClick = {
+                        onSelect(option)
+                        expanded = false
+                    }
+                )
+            }
+        }
     }
 }
 
