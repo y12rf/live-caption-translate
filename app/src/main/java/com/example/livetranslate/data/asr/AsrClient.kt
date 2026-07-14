@@ -155,11 +155,33 @@ class AsrClient(
     }
 
     companion object {
+        /**
+         * Normalize key and apply auth headers.
+         *
+         * MIMO's OpenAI Python SDK uses `Authorization: Bearer <key>`.
+         * Their curl examples often use `api-key: <key>`.
+         * For [ApiAuthStyle.ApiKeyHeader] we send **both** so either style of gateway works.
+         */
         fun Request.Builder.applyAuth(style: ApiAuthStyle, apiKey: String): Request.Builder {
+            val key = normalizeApiKey(apiKey)
             return when (style) {
-                ApiAuthStyle.Bearer -> header("Authorization", "Bearer $apiKey")
-                ApiAuthStyle.ApiKeyHeader -> header("api-key", apiKey)
+                ApiAuthStyle.Bearer ->
+                    header("Authorization", "Bearer $key")
+                ApiAuthStyle.ApiKeyHeader -> {
+                    header("api-key", key)
+                    // OpenAI-compatible clients (incl. MIMO SDK) expect Bearer
+                    header("Authorization", "Bearer $key")
+                }
             }
+        }
+
+        fun normalizeApiKey(apiKey: String): String {
+            var k = apiKey.trim()
+            // User may paste "Bearer sk-xxx" into the key field
+            if (k.startsWith("Bearer ", ignoreCase = true)) {
+                k = k.substring(7).trim()
+            }
+            return k
         }
     }
 }

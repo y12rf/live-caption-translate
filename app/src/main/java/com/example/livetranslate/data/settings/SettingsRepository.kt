@@ -82,14 +82,14 @@ class SettingsRepository(private val context: Context) {
             )
             val next = transform(current)
             prefs[Keys.asrBaseUrl] = UserSettings.normalizeBaseUrl(next.asrBaseUrl)
-            prefs[Keys.asrApiKey] = next.asrApiKey
-            prefs[Keys.asrModel] = next.asrModel
-            prefs[Keys.asrApiStyle] = next.asrApiStyle
-            prefs[Keys.asrAuthStyle] = next.asrAuthStyle
+            prefs[Keys.asrApiKey] = next.asrApiKey.trim()
+            prefs[Keys.asrModel] = next.asrModel.trim()
+            prefs[Keys.asrApiStyle] = next.asrApiStyle.trim()
+            prefs[Keys.asrAuthStyle] = next.asrAuthStyle.trim()
             prefs[Keys.llmBaseUrl] = UserSettings.normalizeBaseUrl(next.llmBaseUrl)
-            prefs[Keys.llmApiKey] = next.llmApiKey
-            prefs[Keys.llmModel] = next.llmModel
-            prefs[Keys.llmAuthStyle] = next.llmAuthStyle
+            prefs[Keys.llmApiKey] = next.llmApiKey.trim()
+            prefs[Keys.llmModel] = next.llmModel.trim()
+            prefs[Keys.llmAuthStyle] = next.llmAuthStyle.trim()
             prefs[Keys.llmSystemPrompt] = next.llmSystemPrompt.ifBlank {
                 UserSettings.DEFAULT_LLM_SYSTEM_PROMPT
             }

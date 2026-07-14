@@ -76,11 +76,19 @@ class LlmClient(
             append("]}")
         }
 
+        val keyPreview = config.apiKey.trim().let { k ->
+            when {
+                k.isEmpty() -> "(empty)"
+                k.length <= 8 -> "***"
+                else -> "${k.take(4)}…${k.takeLast(4)} (len=${k.length})"
+            }
+        }
+
         val request = Request.Builder()
             .url(url)
             .applyAuth(config.authStyle, config.apiKey)
             .header("Content-Type", "application/json")
-            .post(bodyJson.toRequestBody("application/json".toMediaType()))
+            .post(bodyJson.toRequestBody("application/json; charset=utf-8".toMediaType()))
             .build()
 
         val call = http.newCall(request)
@@ -88,11 +96,17 @@ class LlmClient(
             val response = call.execute()
             if (!response.isSuccessful) {
                 val code = response.code
-                val msg = response.body?.string().orEmpty()
+                val msg = response.body?.string().orEmpty().take(500)
                 response.close()
+                val hint = when (code) {
+                    401, 403 ->
+                        " 鉴权失败：检查 LLM API Key、LLM auth（Bearer/ApiKeyHeader）、" +
+                            "以及 API URL 是否指向正确服务。当前 auth=${config.authStyle} url=$url key=$keyPreview"
+                    else -> " url=$url auth=${config.authStyle}"
+                }
                 trySend(
                     LlmStreamEvent.Error(
-                        IOException("LLM HTTP $code: $msg"),
+                        IOException("LLM HTTP $code:$hint | body=$msg"),
                         retryable = code == 408 || code == 429 || code in 500..599
                     )
                 )

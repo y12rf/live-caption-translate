@@ -195,9 +195,9 @@ class SessionOrchestrator(
             utt,
             AsrConfig(
                 baseUrl = settings.normalizedAsrBaseUrl(),
-                apiKey = settings.asrApiKey,
-                model = settings.asrModel,
-                language = settings.inputLanguage,
+                apiKey = settings.asrApiKey.trim(),
+                model = settings.asrModel.trim(),
+                language = settings.inputLanguage.trim(),
                 apiStyle = settings.asrApiStyleEnum(),
                 authStyle = settings.asrAuthStyleEnum()
             )
@@ -234,10 +234,10 @@ class SessionOrchestrator(
             ctx,
             LlmConfig(
                 baseUrl = settings.normalizedLlmBaseUrl(),
-                apiKey = settings.llmApiKey,
-                model = settings.llmModel,
-                targetLanguage = settings.outputLanguage,
-                sourceLanguage = settings.inputLanguage,
+                apiKey = settings.llmApiKey.trim(),
+                model = settings.llmModel.trim(),
+                targetLanguage = settings.outputLanguage.trim(),
+                sourceLanguage = settings.inputLanguage.trim(),
                 systemPrompt = settings.renderLlmSystemPrompt(),
                 authStyle = settings.llmAuthStyleEnum()
             )
