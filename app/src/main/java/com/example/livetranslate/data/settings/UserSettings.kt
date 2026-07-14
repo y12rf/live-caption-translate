@@ -23,10 +23,11 @@ data class UserSettings(
     val llmSystemPrompt: String = DEFAULT_LLM_SYSTEM_PROMPT,
     val inputLanguage: String = "en",
     val outputLanguage: String = "zh",
-    val silenceMs: Int = 500,
-    val maxUtteranceMs: Int = 15_000,
-    val minUtteranceMs: Int = 300,
-    val energyThreshold: Double = 500.0,
+    // More aggressive segmentation defaults (shorter silence / max span → cut sooner)
+    val silenceMs: Int = 300,
+    val maxUtteranceMs: Int = 6_000,
+    val minUtteranceMs: Int = 200,
+    val energyThreshold: Double = 400.0,
     val contextWindowSize: Int = 4
 ) {
     fun normalizedAsrBaseUrl(): String = normalizeBaseUrl(asrBaseUrl)

@@ -137,23 +137,25 @@ class RecordingService : Service() {
             val proj = mpm.getMediaProjection(resultCode, data)
                 ?: throw IllegalStateException("无法创建 MediaProjection，请重试授权")
 
-            // Android 14+: must register callback before capture config / record
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+            // Register callback on all API levels that support it (required on 14+, good on 13)
+            try {
                 proj.registerCallback(projectionCallback, mainHandler)
-            } else {
-                // Older versions also accept callback; register for stop events
-                try {
-                    proj.registerCallback(projectionCallback, mainHandler)
-                } catch (_: Throwable) {
-                    // Some API 29–33 builds may not need it
-                }
+            } catch (t: Throwable) {
+                Log.w(TAG, "registerCallback failed (continuing): ${t.message}")
             }
             projection = proj
             controller.setMediaProjection(proj)
         }
 
-        // 3) Start capture pipeline
-        controller.start()
+        // 3) Start capture after a short delay so OEM MediaProjection is fully ready (Android 12–13)
+        mainHandler.postDelayed({
+            try {
+                controller.start()
+            } catch (e: Exception) {
+                Log.e(TAG, "delayed start failed", e)
+                reportError(controller, e)
+            }
+        }, if (source == AudioSourceType.Internal) 200L else 0L)
 
         observeJob?.cancel()
         observeJob = scope.launch {
@@ -177,13 +179,15 @@ class RecordingService : Service() {
         controller: com.example.livetranslate.domain.SessionController,
         e: Exception
     ) {
-        try {
-            controller.pause()
-        } catch (_: Exception) {
-        }
-        // Surface message via a stop+error path: set error on state if possible
-        // SessionController has no setError; stop keeps UI recoverable
         Log.e(TAG, "Recording error: ${e.message}", e)
+        try {
+            controller.reportCaptureError(e.message ?: "录音启动失败")
+        } catch (_: Exception) {
+            try {
+                controller.pause()
+            } catch (_: Exception) {
+            }
+        }
     }
 
     private fun startAsForeground(source: AudioSourceType, notif: Notification) {
