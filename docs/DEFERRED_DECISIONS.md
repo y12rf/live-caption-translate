@@ -11,16 +11,16 @@
 | 5 | Stop 时 flush 尾段 | 开启（≥ minUtterance 才送 ASR） | 关闭 flush |
 | 6 | 默认 ASR model | `whisper-1` | 如 `gpt-4o-mini-transcribe` |
 | 7 | 默认 LLM model | `gpt-4o-mini` | 任意兼容模型 |
-| 8 | maxUtteranceMs | 10000 | 更短/更长强制截断 |
-| 9 | silenceMs | 700 | 课堂语速可调 |
+| 8 | maxUtteranceMs | **15000（已确认）** | — |
+| 9 | silenceMs | **500（已确认）** | — |
 | 10 | 允许 HTTP cleartext | 是（本地兼容网关） | 仅 HTTPS |
 | 11 | App 图标 | 系统默认图标 | 自定义品牌图标 |
-| 12 | 合并到 master | 仍在 `feature/live-translate-mvp` | 合并/开 PR |
+| 12 | 合并到 master | **已合并（已确认）** | — |
 
 ## 真机验收清单
 
 1. Android Studio 打开本项目，Sync，装到真机/模拟器  
 2. 设置页填入 ASR / LLM 的 Base URL 与 API Key  
 3. Start → 说英语 → 停顿 → 应先流式出 EN，再流式出 ZH  
-4. 连续说超过约 10s 不换气 → 应强制截断并开始下一段  
+4. 连续说超过约 15s 不换气 → 应强制截断并开始下一段  
 5. Pause / Resume / Stop → 历史页可看会话并分享导出  

@@ -9,8 +9,8 @@ data class UserSettings(
     val llmModel: String = "gpt-4o-mini",
     val inputLanguage: String = "en",
     val outputLanguage: String = "zh",
-    val silenceMs: Int = 700,
-    val maxUtteranceMs: Int = 10_000,
+    val silenceMs: Int = 500,
+    val maxUtteranceMs: Int = 15_000,
     val minUtteranceMs: Int = 300,
     val energyThreshold: Double = 500.0,
     val contextWindowSize: Int = 4

@@ -128,8 +128,8 @@ data/
 |------|----------|------|
 | sampleRate | 16000 | 与常见 ASR 兼容 |
 | frameMs | 20–40 | 能量计算粒度 |
-| silenceMs | 700 | 静音判句末 |
-| maxUtteranceMs | 10000 | 强制截断，避免长独白无输出 |
+| silenceMs | 500 | 静音判句末 |
+| maxUtteranceMs | 15000 | 强制截断，避免长独白无输出 |
 | minUtteranceMs | 300 | 过滤误触发 |
 | energyThreshold | 可标定 | 设置页滑条或高级项 |
 
