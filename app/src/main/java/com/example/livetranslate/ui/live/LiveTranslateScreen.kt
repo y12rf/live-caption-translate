@@ -63,7 +63,6 @@ fun LiveTranslateScreen(
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     val context = LocalContext.current
-    val activity = context as? Activity
     val enScroll = rememberScrollState()
     val zhScroll = rememberScrollState()
     var pendingStartSource by remember { mutableStateOf(AudioSourceType.Microphone) }
