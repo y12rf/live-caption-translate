@@ -44,6 +44,8 @@ class RecordingService : Service() {
     private var observeJob: Job? = null
     private var projection: MediaProjection? = null
     private val mainHandler = Handler(Looper.getMainLooper())
+    /** Ignore initial Idle emissions so we don't release MediaProjection before start(). */
+    private var sessionEverNonIdle = false
 
     private val projectionCallback = object : MediaProjection.Callback() {
         override fun onStop() {
@@ -158,43 +160,56 @@ class RecordingService : Service() {
             controller.setMediaProjection(proj)
             // Token consumed only after successful MediaProjection creation
             ProjectionTokenStore.consume()
+            Log.i(TAG, "MediaProjection set on controller, ready to start")
         }
 
-        // 3) Start capture after a short delay (OEM / Pixel readiness)
-        val delayMs = if (source == AudioSourceType.Internal) 300L else 0L
-        mainHandler.postDelayed({
-            try {
-                if (source == AudioSourceType.Internal &&
-                    controller.audio.mediaProjection == null
-                ) {
-                    reportError(
-                        controller,
-                        IllegalStateException("内部录音未获得 MediaProjection 授权（启动时已丢失）")
-                    )
-                    return@postDelayed
-                }
-                controller.start()
-            } catch (e: Exception) {
-                Log.e(TAG, "delayed start failed", e)
-                reportError(controller, e)
-            }
-        }, delayMs)
-
+        // 3) Observe state — only tear down on transition *to* Idle *after* we have run
         observeJob?.cancel()
+        sessionEverNonIdle = false
         observeJob = scope.launch {
-            controller.state.collectLatest { st ->
+            var lastPhase: SessionPhase? = null
+            controller.state.collect { st ->
                 try {
                     val n = buildNotification(st.phase, st.recordedElapsedMs)
                     getSystemService(NotificationManager::class.java).notify(NOTIF_ID, n)
                 } catch (e: Exception) {
                     Log.w(TAG, "notify update failed", e)
                 }
-                if (st.phase == SessionPhase.Idle) {
+                if (st.phase != SessionPhase.Idle) {
+                    sessionEverNonIdle = true
+                }
+                // BUGFIX: first emission is Idle before start() — must NOT releaseProjection here
+                // or delayed/immediate start sees mediaProjection == null on Pixel/API35.
+                val leftSession = sessionEverNonIdle &&
+                    lastPhase != null &&
+                    lastPhase != SessionPhase.Idle &&
+                    st.phase == SessionPhase.Idle
+                if (leftSession) {
+                    Log.i(TAG, "session ended → release projection & stop service")
                     releaseProjection()
                     stopOverlay()
                     stopSelf()
                 }
+                lastPhase = st.phase
             }
+        }
+
+        // 4) Start capture. AudioCapture already delays 150ms for internal formats.
+        // Do not clear projection between setMediaProjection and start.
+        try {
+            if (source == AudioSourceType.Internal &&
+                controller.audio.mediaProjection == null
+            ) {
+                throw IllegalStateException(
+                    "内部录音未获得 MediaProjection 授权（set 后仍为 null）"
+                )
+            }
+            controller.start()
+        } catch (e: Exception) {
+            Log.e(TAG, "controller.start failed", e)
+            reportError(controller, e)
+            releaseProjection()
+            stopSelf()
         }
     }
 
