@@ -11,11 +11,17 @@ enum class AsrApiStyle {
     ChatCompletionsAudio
 }
 
-/** Auth header style for OpenAI-compatible gateways. */
+/**
+ * Auth header style for OpenAI-compatible gateways.
+ *
+ * Note: "having an API Key" ≠ [ApiKeyHeader].
+ * - DeepSeek / OpenAI / most chat APIs: use [Bearer] with your key as the token.
+ * - Some gateways (e.g. MIMO curl): use HTTP header literally named `api-key` → [ApiKeyHeader].
+ */
 enum class ApiAuthStyle {
-    /** Authorization: Bearer <key> */
+    /** Authorization: Bearer <key>  — DeepSeek, OpenAI, most LLM APIs */
     Bearer,
-    /** api-key: <key>  (Xiaomi MIMO etc.) */
+    /** Header `api-key: <key>` (+ also sends Bearer for compatibility) */
     ApiKeyHeader
 }
 

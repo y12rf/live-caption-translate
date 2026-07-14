@@ -13,7 +13,8 @@ data class UserSettings(
     val llmBaseUrl: String = "https://api.openai.com",
     val llmApiKey: String = "",
     val llmModel: String = "gpt-4o-mini",
-    val llmAuthStyle: String = ApiAuthStyle.ApiKeyHeader.name,
+    // DeepSeek / OpenAI chat: Bearer. ASR MIMO may still use ApiKeyHeader separately.
+    val llmAuthStyle: String = ApiAuthStyle.Bearer.name,
     /**
      * LLM system prompt template. Placeholders:
      * - `{{to}}` → output language (e.g. zh / Chinese)
@@ -38,7 +39,7 @@ data class UserSettings(
         runCatching { ApiAuthStyle.valueOf(asrAuthStyle) }.getOrDefault(ApiAuthStyle.ApiKeyHeader)
 
     fun llmAuthStyleEnum(): ApiAuthStyle =
-        runCatching { ApiAuthStyle.valueOf(llmAuthStyle) }.getOrDefault(ApiAuthStyle.ApiKeyHeader)
+        runCatching { ApiAuthStyle.valueOf(llmAuthStyle) }.getOrDefault(ApiAuthStyle.Bearer)
 
     fun renderLlmSystemPrompt(): String =
         llmSystemPrompt

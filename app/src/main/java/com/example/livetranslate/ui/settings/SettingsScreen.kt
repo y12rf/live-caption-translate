@@ -172,11 +172,26 @@ fun SettingsScreen(
                 onInfo = {
                     showInfo(
                         "LLM auth",
-                        "• Bearer — Authorization: Bearer <key>\n" +
-                            "• ApiKeyHeader — api-key: <key>"
+                        "有 API Key ≠ 选 ApiKeyHeader。\n\n" +
+                            "• Bearer（DeepSeek / OpenAI 等）— 请求头：\n" +
+                            "  Authorization: Bearer <你的Key>\n" +
+                            "• ApiKeyHeader — 请求头名就是 api-key（部分网关 curl 写法）\n\n" +
+                            "DeepSeek 请选 Bearer。"
                     )
                 }
             )
+            Button(
+                onClick = {
+                    viewModel.updateDraft { s ->
+                        s.copy(
+                            llmBaseUrl = "https://api.deepseek.com",
+                            llmModel = "deepseek-chat",
+                            llmAuthStyle = ApiAuthStyle.Bearer.name
+                        )
+                    }
+                },
+                modifier = Modifier.fillMaxWidth()
+            ) { Text("Fill DeepSeek LLM defaults") }
             multilineField(
                 label = "Translation system prompt",
                 value = d.llmSystemPrompt,
