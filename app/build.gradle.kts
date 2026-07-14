@@ -16,6 +16,18 @@ android {
         versionCode = 1
         versionName = "0.1.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+        // Real phones need arm*; include all common ABIs so install does not fail with
+        // "native libraries do not support the device's CPU architecture"
+        ndk {
+            abiFilters += listOf("armeabi-v7a", "arm64-v8a", "x86", "x86_64")
+        }
+    }
+
+    // Do not produce ABI-split APKs (single universal debug APK for sideload)
+    splits {
+        abi {
+            isEnable = false
+        }
     }
 
     buildTypes {
