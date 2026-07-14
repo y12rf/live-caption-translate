@@ -12,8 +12,8 @@ import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
-import com.example.livetranslate.data.asr.ApiAuthStyle
 import com.example.livetranslate.data.asr.AsrClient.Companion.applyAuth
+import com.example.livetranslate.data.network.ApiUrlResolver
 import com.example.livetranslate.data.network.JsonLite
 import java.io.IOException
 
@@ -30,8 +30,8 @@ class LlmClient(
         context: List<ContextTurn>,
         config: LlmConfig
     ): Flow<LlmStreamEvent> = callbackFlow {
-        val root = config.baseUrl.trim().trimEnd('/').removeSuffix("/v1")
-        val url = "$root/v1/chat/completions"
+        // Full URL after /v1/ → as-is; else OpenAI-style /v1/chat/completions
+        val url = ApiUrlResolver.resolve(config.baseUrl, "/v1/chat/completions")
 
         val historyBlock = if (context.isEmpty()) {
             "(none)"

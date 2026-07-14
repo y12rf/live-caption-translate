@@ -57,9 +57,14 @@ fun SettingsScreen(
                 .verticalScroll(rememberScrollState())
         ) {
             Text("ASR")
-            field("Base URL (no path, or .../v1 ok)", d.asrBaseUrl) {
+            field("API URL", d.asrBaseUrl) {
                 viewModel.updateDraft { s -> s.copy(asrBaseUrl = it) }
             }
+            Text(
+                "完整接口(…/v1/xxx)原样用；只填站点或…/v1 则补 OpenAI 风格 path",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
             field("API Key", d.asrApiKey) {
                 viewModel.updateDraft { s -> s.copy(asrApiKey = it) }
             }
@@ -73,7 +78,7 @@ fun SettingsScreen(
                 viewModel.updateDraft { s -> s.copy(asrApiStyle = it.trim()) }
             }
             Text(
-                "MIMO ASR → ChatCompletionsAudio; classic Whisper → OpenAiTranscriptions",
+                "请求体格式：Whisper multipart / chat+base64 音频（与 URL 规则无关）",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
@@ -83,16 +88,11 @@ fun SettingsScreen(
             ) {
                 viewModel.updateDraft { s -> s.copy(asrAuthStyle = it.trim()) }
             }
-            Text(
-                "MIMO uses ApiKeyHeader (header api-key); OpenAI uses Bearer",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
             Button(
                 onClick = {
                     viewModel.updateDraft { s ->
                         s.copy(
-                            asrBaseUrl = "https://api.xiaomimimo.com",
+                            asrBaseUrl = "https://api.xiaomimimo.com/v1/chat/completions",
                             asrModel = "mimo-v2.5-asr",
                             asrApiStyle = AsrApiStyle.ChatCompletionsAudio.name,
                             asrAuthStyle = ApiAuthStyle.ApiKeyHeader.name,
@@ -105,9 +105,14 @@ fun SettingsScreen(
 
             Spacer(Modifier.height(16.dp))
             Text("LLM (chat completions stream)")
-            field("Base URL", d.llmBaseUrl) {
+            field("API URL", d.llmBaseUrl) {
                 viewModel.updateDraft { s -> s.copy(llmBaseUrl = it) }
             }
+            Text(
+                "完整接口原样用；否则补 /v1/chat/completions",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
             field("API Key", d.llmApiKey) {
                 viewModel.updateDraft { s -> s.copy(llmApiKey = it) }
             }

@@ -1,6 +1,7 @@
 package com.example.livetranslate.data.asr
 
 import com.example.livetranslate.data.audio.WavEncoder
+import com.example.livetranslate.data.network.ApiUrlResolver
 import com.example.livetranslate.data.network.JsonLite
 import com.example.livetranslate.data.network.SseReader
 import com.example.livetranslate.domain.AsrTextMerger
@@ -19,11 +20,10 @@ import okhttp3.RequestBody.Companion.toRequestBody
 import java.io.IOException
 
 /**
- * Streaming ASR client supporting:
- * 1) OpenAI-style `/v1/audio/transcriptions` (multipart)
- * 2) Chat completions + base64 `input_audio` (Xiaomi MIMO `mimo-v2.5-asr` etc.)
+ * Streaming ASR client.
  *
- * Both use `stream=true` and parse SSE lines; each chunk updates UI via [AsrStreamEvent.Delta].
+ * URL: [ApiUrlResolver] — full path after `/v1/` used as-is; otherwise OpenAI-style default path.
+ * Body style still selected by [AsrApiStyle] (multipart Whisper vs chat+base64 audio).
  */
 class AsrClient(
     private val http: OkHttpClient
@@ -33,13 +33,15 @@ class AsrClient(
         config: AsrConfig
     ): Flow<AsrStreamEvent> = callbackFlow {
         val wav = WavEncoder.pcm16MonoToWav(audio.pcm, audio.sampleRate)
-        val base = config.baseUrl.trim().trimEnd('/')
-        // Avoid double /v1 if user pastes .../v1 already
-        val root = base.removeSuffix("/v1")
+        val defaultPath = when (config.apiStyle) {
+            AsrApiStyle.OpenAiTranscriptions -> "/v1/audio/transcriptions"
+            AsrApiStyle.ChatCompletionsAudio -> "/v1/chat/completions"
+        }
+        val url = ApiUrlResolver.resolve(config.baseUrl, defaultPath)
 
         val request = when (config.apiStyle) {
-            AsrApiStyle.OpenAiTranscriptions -> buildTranscriptionsRequest(root, wav, config)
-            AsrApiStyle.ChatCompletionsAudio -> buildChatAudioRequest(root, wav, config)
+            AsrApiStyle.OpenAiTranscriptions -> buildTranscriptionsRequest(url, wav, config)
+            AsrApiStyle.ChatCompletionsAudio -> buildChatAudioRequest(url, wav, config)
         }
 
         val call = http.newCall(request)
@@ -65,7 +67,6 @@ class AsrClient(
                 return@callbackFlow
             }
             var acc = ""
-            // SSE: data: {...}\n\n  — emit merged text for typewriter UI
             for (payload in SseReader.readPayloads(source)) {
                 val piece = extractText(payload) ?: continue
                 acc = AsrTextMerger.merge(acc, piece)
@@ -86,16 +87,11 @@ class AsrClient(
         awaitClose { call.cancel() }
     }.flowOn(Dispatchers.IO)
 
-    /**
-     * OpenAI Whisper-style:
-     * POST {base}/v1/audio/transcriptions  multipart file + stream=true
-     */
     private fun buildTranscriptionsRequest(
-        root: String,
+        url: String,
         wav: ByteArray,
         config: AsrConfig
     ): Request {
-        val url = "$root/v1/audio/transcriptions"
         val body = MultipartBody.Builder()
             .setType(MultipartBody.FORM)
             .addFormDataPart(
@@ -114,18 +110,11 @@ class AsrClient(
             .build()
     }
 
-    /**
-     * MIMO / chat-audio style (matches official curl):
-     * POST {base}/v1/chat/completions
-     * messages[0].content[] = input_audio data URI base64
-     * asr_options.language, stream=true
-     */
     private fun buildChatAudioRequest(
-        root: String,
+        url: String,
         wav: ByteArray,
         config: AsrConfig
     ): Request {
-        val url = "$root/v1/chat/completions"
         val b64 = java.util.Base64.getEncoder().encodeToString(wav)
         val dataUri = "data:audio/wav;base64,$b64"
         val lang = config.language.ifBlank { "auto" }
@@ -155,9 +144,6 @@ class AsrClient(
             .build()
     }
 
-    /**
-     * Best-effort extraction from SSE JSON chunks (text / delta / content).
-     */
     internal fun extractText(payload: String): String? {
         return try {
             JsonLite.firstStringField(payload, "text")
