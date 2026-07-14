@@ -13,8 +13,8 @@ android {
         applicationId = "com.example.livetranslate"
         minSdk = 26
         targetSdk = 34
-        versionCode = 1
-        versionName = "0.1.0"
+        versionCode = 2
+        versionName = "0.2.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         // Real phones need arm*; include all common ABIs so install does not fail with
         // "native libraries do not support the device's CPU architecture"
