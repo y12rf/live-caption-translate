@@ -191,36 +191,20 @@ class RecordingService : Service() {
     }
 
     private fun startAsForeground(source: AudioSourceType, notif: Notification) {
-        try {
-            if (Build.VERSION.SDK_INT >= 34) {
-                // Android 14+: match declared foregroundServiceType in manifest
-                var type = ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
-                if (source == AudioSourceType.Internal) {
-                    type = type or ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION
-                }
-                startForeground(NOTIF_ID, notif, type)
-            } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                // API 29–33: microphone type is enough; mediaProjection FGS type is API 34+
-                startForeground(
-                    NOTIF_ID,
-                    notif,
+        // MediaProjection APIs require FGS type MEDIA_PROJECTION (API 29+ constant).
+        // Without it, getMediaProjection / capture throws:
+        // "Media projections require a foreground service of type ... MEDIA_PROJECTION"
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            val type = when (source) {
+                AudioSourceType.Internal ->
+                    ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION or
+                        ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
+                AudioSourceType.Microphone ->
                     ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
-                )
-            } else {
-                startForeground(NOTIF_ID, notif)
             }
-        } catch (e: Exception) {
-            // Fallback: try without mediaProjection type if OEM rejects combo
-            Log.w(TAG, "startForeground typed failed, fallback", e)
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                startForeground(
-                    NOTIF_ID,
-                    notif,
-                    ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
-                )
-            } else {
-                startForeground(NOTIF_ID, notif)
-            }
+            startForeground(NOTIF_ID, notif, type)
+        } else {
+            startForeground(NOTIF_ID, notif)
         }
     }
 
