@@ -1,6 +1,7 @@
 package com.example.livetranslate.ui.settings
 
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -10,17 +11,23 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.outlined.Info
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -36,6 +43,26 @@ fun SettingsScreen(
 ) {
     val ui by viewModel.ui.collectAsStateWithLifecycle()
     val d = ui.draft
+    var infoTitle by remember { mutableStateOf<String?>(null) }
+    var infoBody by remember { mutableStateOf("") }
+
+    fun showInfo(title: String, body: String) {
+        infoTitle = title
+        infoBody = body
+    }
+
+    if (infoTitle != null) {
+        AlertDialog(
+            onDismissRequest = { infoTitle = null },
+            title = { Text(infoTitle!!) },
+            text = { Text(infoBody) },
+            confirmButton = {
+                TextButton(onClick = { infoTitle = null }) {
+                    Text("OK")
+                }
+            }
+        )
+    }
 
     Scaffold(
         topBar = {
@@ -56,38 +83,58 @@ fun SettingsScreen(
                 .padding(16.dp)
                 .verticalScroll(rememberScrollState())
         ) {
-            Text("ASR")
-            field("API URL", d.asrBaseUrl) {
-                viewModel.updateDraft { s -> s.copy(asrBaseUrl = it) }
-            }
-            Text(
-                "完整接口(…/v1/xxx)原样用；只填站点或…/v1 则补 OpenAI 风格 path",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-            field("API Key", d.asrApiKey) {
-                viewModel.updateDraft { s -> s.copy(asrApiKey = it) }
-            }
-            field("Model", d.asrModel) {
-                viewModel.updateDraft { s -> s.copy(asrModel = it) }
-            }
+            sectionTitle("ASR")
             field(
-                "ASR style: OpenAiTranscriptions | ChatCompletionsAudio",
-                d.asrApiStyle
-            ) {
-                viewModel.updateDraft { s -> s.copy(asrApiStyle = it.trim()) }
-            }
-            Text(
-                "请求体格式：Whisper multipart / chat+base64 音频（与 URL 规则无关）",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
+                label = "API URL",
+                value = d.asrBaseUrl,
+                onChange = { viewModel.updateDraft { s -> s.copy(asrBaseUrl = it) } },
+                onInfo = {
+                    showInfo(
+                        "ASR API URL",
+                        "若 URL 在 /v1/ 后面还有路径（完整接口），则原样使用。\n" +
+                            "若只填站点或只到 …/v1，则按 OpenAI 风格自动补 path：\n" +
+                            "• OpenAiTranscriptions → /v1/audio/transcriptions\n" +
+                            "• ChatCompletionsAudio → /v1/chat/completions"
+                    )
+                }
             )
             field(
-                "ASR auth: Bearer | ApiKeyHeader",
-                d.asrAuthStyle
-            ) {
-                viewModel.updateDraft { s -> s.copy(asrAuthStyle = it.trim()) }
-            }
+                label = "API Key",
+                value = d.asrApiKey,
+                onChange = { viewModel.updateDraft { s -> s.copy(asrApiKey = it) } }
+            )
+            field(
+                label = "Model",
+                value = d.asrModel,
+                onChange = { viewModel.updateDraft { s -> s.copy(asrModel = it) } }
+            )
+            field(
+                label = "ASR style",
+                value = d.asrApiStyle,
+                onChange = { viewModel.updateDraft { s -> s.copy(asrApiStyle = it.trim()) } },
+                onInfo = {
+                    showInfo(
+                        "ASR style",
+                        "取值：\n" +
+                            "• OpenAiTranscriptions — multipart 上传 WAV（经典 Whisper）\n" +
+                            "• ChatCompletionsAudio — chat + base64 input_audio（如 MIMO）\n\n" +
+                            "只影响请求体格式，与 URL 解析规则无关。"
+                    )
+                }
+            )
+            field(
+                label = "ASR auth",
+                value = d.asrAuthStyle,
+                onChange = { viewModel.updateDraft { s -> s.copy(asrAuthStyle = it.trim()) } },
+                onInfo = {
+                    showInfo(
+                        "ASR auth",
+                        "取值：\n" +
+                            "• Bearer — Authorization: Bearer <key>\n" +
+                            "• ApiKeyHeader — api-key: <key>（如小米 MIMO）"
+                    )
+                }
+            )
             Button(
                 onClick = {
                     viewModel.updateDraft { s ->
@@ -104,37 +151,54 @@ fun SettingsScreen(
             ) { Text("Fill MIMO ASR defaults") }
 
             Spacer(Modifier.height(16.dp))
-            Text("LLM (chat completions stream)")
-            field("API URL", d.llmBaseUrl) {
-                viewModel.updateDraft { s -> s.copy(llmBaseUrl = it) }
-            }
-            Text(
-                "完整接口原样用；否则补 /v1/chat/completions",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-            field("API Key", d.llmApiKey) {
-                viewModel.updateDraft { s -> s.copy(llmApiKey = it) }
-            }
-            field("Model", d.llmModel) {
-                viewModel.updateDraft { s -> s.copy(llmModel = it) }
-            }
+            sectionTitle("LLM")
             field(
-                "LLM auth: Bearer | ApiKeyHeader",
-                d.llmAuthStyle
-            ) {
-                viewModel.updateDraft { s -> s.copy(llmAuthStyle = it.trim()) }
-            }
+                label = "API URL",
+                value = d.llmBaseUrl,
+                onChange = { viewModel.updateDraft { s -> s.copy(llmBaseUrl = it) } },
+                onInfo = {
+                    showInfo(
+                        "LLM API URL",
+                        "若 /v1/ 后已有路径则原样使用。\n" +
+                            "否则补全为 OpenAI 风格：/v1/chat/completions"
+                    )
+                }
+            )
+            field(
+                label = "API Key",
+                value = d.llmApiKey,
+                onChange = { viewModel.updateDraft { s -> s.copy(llmApiKey = it) } }
+            )
+            field(
+                label = "Model",
+                value = d.llmModel,
+                onChange = { viewModel.updateDraft { s -> s.copy(llmModel = it) } }
+            )
+            field(
+                label = "LLM auth",
+                value = d.llmAuthStyle,
+                onChange = { viewModel.updateDraft { s -> s.copy(llmAuthStyle = it.trim()) } },
+                onInfo = {
+                    showInfo(
+                        "LLM auth",
+                        "取值：\n" +
+                            "• Bearer — Authorization: Bearer <key>\n" +
+                            "• ApiKeyHeader — api-key: <key>"
+                    )
+                }
+            )
             multilineField(
                 label = "Translation system prompt",
                 value = d.llmSystemPrompt,
-                onChange = { viewModel.updateDraft { s -> s.copy(llmSystemPrompt = it) } }
-            )
-            Text(
-                text = "Placeholders: {{to}} = output language, {{from}} = input language",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(bottom = 4.dp)
+                onChange = { viewModel.updateDraft { s -> s.copy(llmSystemPrompt = it) } },
+                onInfo = {
+                    showInfo(
+                        "System prompt",
+                        "翻译用系统提示词。占位符：\n" +
+                            "• {{to}} — 输出语言（设置里的 Output language）\n" +
+                            "• {{from}} — 输入语言（Input language）"
+                    )
+                }
             )
             Button(
                 onClick = {
@@ -148,41 +212,78 @@ fun SettingsScreen(
             }
 
             Spacer(Modifier.height(16.dp))
-            Text("Languages")
-            field("Input language", d.inputLanguage) {
-                viewModel.updateDraft { s -> s.copy(inputLanguage = it) }
-            }
-            field("Output language", d.outputLanguage) {
-                viewModel.updateDraft { s -> s.copy(outputLanguage = it) }
-            }
+            sectionTitle("Languages")
+            field(
+                label = "Input language",
+                value = d.inputLanguage,
+                onChange = { viewModel.updateDraft { s -> s.copy(inputLanguage = it) } }
+            )
+            field(
+                label = "Output language",
+                value = d.outputLanguage,
+                onChange = { viewModel.updateDraft { s -> s.copy(outputLanguage = it) } }
+            )
 
             Spacer(Modifier.height(16.dp))
-            Text("VAD / chunking")
-            field("Silence ms", d.silenceMs.toString()) {
-                it.toIntOrNull()?.let { v ->
-                    viewModel.updateDraft { s -> s.copy(silenceMs = v) }
+            sectionTitle(
+                title = "VAD / chunking",
+                onInfo = {
+                    showInfo(
+                        "VAD / chunking",
+                        "能量 VAD 切句参数：\n" +
+                            "• Silence ms — 静音持续多久判为一句结束\n" +
+                            "• Max utterance ms — 最长采样，超时强制截断\n" +
+                            "• Min utterance ms — 过短片段丢弃\n" +
+                            "• Energy threshold — 能量阈值\n" +
+                            "• Context window N — LLM 滑动上下文句数"
+                    )
                 }
-            }
-            field("Max utterance ms (force cut)", d.maxUtteranceMs.toString()) {
-                it.toIntOrNull()?.let { v ->
-                    viewModel.updateDraft { s -> s.copy(maxUtteranceMs = v) }
+            )
+            field(
+                label = "Silence ms",
+                value = d.silenceMs.toString(),
+                onChange = {
+                    it.toIntOrNull()?.let { v ->
+                        viewModel.updateDraft { s -> s.copy(silenceMs = v) }
+                    }
                 }
-            }
-            field("Min utterance ms", d.minUtteranceMs.toString()) {
-                it.toIntOrNull()?.let { v ->
-                    viewModel.updateDraft { s -> s.copy(minUtteranceMs = v) }
+            )
+            field(
+                label = "Max utterance ms",
+                value = d.maxUtteranceMs.toString(),
+                onChange = {
+                    it.toIntOrNull()?.let { v ->
+                        viewModel.updateDraft { s -> s.copy(maxUtteranceMs = v) }
+                    }
                 }
-            }
-            field("Energy threshold", d.energyThreshold.toString()) {
-                it.toDoubleOrNull()?.let { v ->
-                    viewModel.updateDraft { s -> s.copy(energyThreshold = v) }
+            )
+            field(
+                label = "Min utterance ms",
+                value = d.minUtteranceMs.toString(),
+                onChange = {
+                    it.toIntOrNull()?.let { v ->
+                        viewModel.updateDraft { s -> s.copy(minUtteranceMs = v) }
+                    }
                 }
-            }
-            field("Context window N", d.contextWindowSize.toString()) {
-                it.toIntOrNull()?.let { v ->
-                    viewModel.updateDraft { s -> s.copy(contextWindowSize = v) }
+            )
+            field(
+                label = "Energy threshold",
+                value = d.energyThreshold.toString(),
+                onChange = {
+                    it.toDoubleOrNull()?.let { v ->
+                        viewModel.updateDraft { s -> s.copy(energyThreshold = v) }
+                    }
                 }
-            }
+            )
+            field(
+                label = "Context window N",
+                value = d.contextWindowSize.toString(),
+                onChange = {
+                    it.toIntOrNull()?.let { v ->
+                        viewModel.updateDraft { s -> s.copy(contextWindowSize = v) }
+                    }
+                }
+            )
 
             Spacer(Modifier.height(16.dp))
             Button(
@@ -198,7 +299,35 @@ fun SettingsScreen(
 }
 
 @Composable
-private fun field(label: String, value: String, onChange: (String) -> Unit) {
+private fun sectionTitle(title: String, onInfo: (() -> Unit)? = null) {
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Text(title, modifier = Modifier.weight(1f))
+        if (onInfo != null) {
+            InfoButton(onClick = onInfo)
+        }
+    }
+}
+
+@Composable
+private fun InfoButton(onClick: () -> Unit) {
+    IconButton(onClick = onClick) {
+        Icon(
+            imageVector = Icons.Outlined.Info,
+            contentDescription = "Info"
+        )
+    }
+}
+
+@Composable
+private fun field(
+    label: String,
+    value: String,
+    onChange: (String) -> Unit,
+    onInfo: (() -> Unit)? = null
+) {
     OutlinedTextField(
         value = value,
         onValueChange = onChange,
@@ -206,12 +335,22 @@ private fun field(label: String, value: String, onChange: (String) -> Unit) {
         modifier = Modifier
             .fillMaxWidth()
             .padding(vertical = 4.dp),
-        singleLine = true
+        singleLine = true,
+        trailingIcon = if (onInfo != null) {
+            { InfoButton(onClick = onInfo) }
+        } else {
+            null
+        }
     )
 }
 
 @Composable
-private fun multilineField(label: String, value: String, onChange: (String) -> Unit) {
+private fun multilineField(
+    label: String,
+    value: String,
+    onChange: (String) -> Unit,
+    onInfo: (() -> Unit)? = null
+) {
     OutlinedTextField(
         value = value,
         onValueChange = onChange,
@@ -222,6 +361,11 @@ private fun multilineField(label: String, value: String, onChange: (String) -> U
             .height(140.dp),
         singleLine = false,
         minLines = 4,
-        maxLines = 10
+        maxLines = 10,
+        trailingIcon = if (onInfo != null) {
+            { InfoButton(onClick = onInfo) }
+        } else {
+            null
+        }
     )
 }
