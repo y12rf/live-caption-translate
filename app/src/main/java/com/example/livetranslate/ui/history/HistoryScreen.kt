@@ -16,6 +16,7 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.ListItem
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
@@ -93,6 +94,7 @@ fun HistoryDetailScreen(
 ) {
     val detail by viewModel.detail.collectAsStateWithLifecycle()
     val context = LocalContext.current
+    val wallFmt = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault())
 
     LaunchedEffect(sessionId) {
         viewModel.loadDetail(sessionId)
@@ -134,6 +136,11 @@ fun HistoryDetailScreen(
             ) {
                 items(d.segments, key = { it.id }) { seg ->
                     Column(modifier = Modifier.padding(vertical = 12.dp)) {
+                        Text(
+                            "[${com.example.livetranslate.data.history.HistoryExport.formatOffset(seg.offsetMs)}]  " +
+                                wallFmt.format(Date(seg.createdAt)),
+                            style = MaterialTheme.typography.labelSmall
+                        )
                         Text("EN: ${seg.source}")
                         Text("ZH: ${seg.translation}")
                         if (seg.incomplete) Text("(incomplete)")

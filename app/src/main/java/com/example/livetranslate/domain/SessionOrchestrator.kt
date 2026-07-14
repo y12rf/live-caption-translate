@@ -4,11 +4,13 @@ import com.example.livetranslate.data.asr.AsrClient
 import com.example.livetranslate.data.asr.AsrConfig
 import com.example.livetranslate.data.asr.AsrOutputSanitizer
 import com.example.livetranslate.data.audio.AudioCapture
+import com.example.livetranslate.data.history.HistoryExport
 import com.example.livetranslate.data.history.HistoryRepository
 import com.example.livetranslate.data.llm.LlmClient
 import com.example.livetranslate.data.llm.LlmConfig
 import com.example.livetranslate.data.settings.SettingsRepository
 import com.example.livetranslate.domain.model.AsrStreamEvent
+import com.example.livetranslate.domain.model.AudioSourceType
 import com.example.livetranslate.domain.model.ContextTurn
 import com.example.livetranslate.domain.model.CutReason
 import com.example.livetranslate.domain.model.LlmStreamEvent
@@ -25,6 +27,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 
 data class LiveSessionUiState(
@@ -36,12 +39,17 @@ data class LiveSessionUiState(
     val lastCutReason: CutReason? = null,
     val error: String? = null,
     val canRetry: Boolean = false,
-    val segments: List<TranscriptSegment> = emptyList()
+    val segments: List<TranscriptSegment> = emptyList(),
+    /** Wall-clock session start; 0 if idle. */
+    val sessionStartedAt: Long = 0L,
+    /** Accumulated recording time in ms (pauses excluded). */
+    val recordedElapsedMs: Long = 0L,
+    val audioSource: AudioSourceType = AudioSourceType.Microphone,
+    val overlayEnabled: Boolean = false
 )
 
 /**
  * Serial pipeline: utterance queue → ASR stream → LLM stream → UI state.
- * One utterance at a time keeps bilingual text ordered and context window correct.
  */
 class SessionOrchestrator(
     private val scope: CoroutineScope,
@@ -57,26 +65,53 @@ class SessionOrchestrator(
     private val queue = Channel<UtteranceAudio>(Channel.UNLIMITED)
     private var worker: Job? = null
     private var collector: Job? = null
+    private var timerJob: Job? = null
     private var sessionStartedAt: Long = 0L
+    private var recordedElapsedMs: Long = 0L
+    private var segmentClockStart: Long = 0L
     private val contextWindow = ArrayDeque<ContextTurn>()
     private var lastFailed: UtteranceAudio? = null
     private var processJob: Job? = null
+
+    fun setAudioSource(type: AudioSourceType) {
+        if (_state.value.phase != SessionPhase.Idle) return
+        audio.sourceType = type
+        _state.update { it.copy(audioSource = type) }
+    }
+
+    fun setOverlayEnabled(enabled: Boolean) {
+        _state.update { it.copy(overlayEnabled = enabled) }
+    }
 
     fun start() {
         val current = _state.value.phase
         if (current == SessionPhase.Recording || current == SessionPhase.Processing) return
 
         if (current == SessionPhase.Idle) {
-            // New session
             sessionStartedAt = System.currentTimeMillis()
+            recordedElapsedMs = 0L
             contextWindow.clear()
-            _state.value = LiveSessionUiState(phase = SessionPhase.Recording)
+            audio.sourceType = _state.value.audioSource
+            _state.value = LiveSessionUiState(
+                phase = SessionPhase.Recording,
+                sessionStartedAt = sessionStartedAt,
+                recordedElapsedMs = 0L,
+                audioSource = audio.sourceType,
+                overlayEnabled = _state.value.overlayEnabled
+            )
         } else {
-            // Resume from Paused — keep cumulative text
-            _state.update { it.copy(phase = SessionPhase.Recording, error = null) }
+            _state.update {
+                it.copy(
+                    phase = SessionPhase.Recording,
+                    error = null,
+                    sessionStartedAt = sessionStartedAt
+                )
+            }
         }
 
+        segmentClockStart = System.currentTimeMillis()
         ensureWorker()
+        ensureTimer()
         if (collector?.isActive != true) {
             collector = scope.launch {
                 audio.utterances.collect { utt ->
@@ -84,44 +119,58 @@ class SessionOrchestrator(
                 }
             }
         }
-        audio.start()
+        try {
+            audio.start()
+        } catch (e: Exception) {
+            _state.update {
+                it.copy(
+                    phase = SessionPhase.Idle,
+                    error = e.message ?: "Failed to start audio"
+                )
+            }
+            stopTimer()
+        }
     }
 
     fun pause() {
+        accumulateElapsed()
         audio.pause()
+        stopTimer()
         _state.update {
             it.copy(
-                phase = if (it.phase == SessionPhase.Processing) {
-                    SessionPhase.Processing
-                } else {
-                    SessionPhase.Paused
-                }
+                phase = SessionPhase.Paused,
+                recordedElapsedMs = recordedElapsedMs
             )
-        }
-        // If not processing, mark paused; when processing ends, restore phase based on isRecording
-        if (_state.value.phase != SessionPhase.Processing) {
-            _state.update { it.copy(phase = SessionPhase.Paused) }
         }
     }
 
     fun stop() {
+        accumulateElapsed()
         audio.stop(flush = true)
         collector?.cancel()
         collector = null
         processJob?.cancel()
         processJob = null
+        stopTimer()
         val snapshot = _state.value
+        val started = sessionStartedAt
         scope.launch {
             if (snapshot.segments.isNotEmpty()) {
                 history.saveSession(
-                    sessionStartedAt,
+                    started,
                     System.currentTimeMillis(),
                     snapshot.segments
                 )
             }
             contextWindow.clear()
             lastFailed = null
-            _state.value = LiveSessionUiState(phase = SessionPhase.Idle)
+            sessionStartedAt = 0L
+            recordedElapsedMs = 0L
+            _state.value = LiveSessionUiState(
+                phase = SessionPhase.Idle,
+                audioSource = audio.sourceType,
+                overlayEnabled = snapshot.overlayEnabled
+            )
         }
     }
 
@@ -130,6 +179,49 @@ class SessionOrchestrator(
         lastFailed = null
         _state.update { it.copy(error = null, canRetry = false) }
         scope.launch { processUtterance(u) }
+    }
+
+    fun exportMarkdown(): String? {
+        val s = _state.value
+        if (s.segments.isEmpty()) return null
+        return HistoryExport.formatMarkdownFromLive(
+            s.sessionStartedAt.takeIf { it > 0 } ?: System.currentTimeMillis(),
+            s.segments
+        )
+    }
+
+    private fun accumulateElapsed() {
+        if (segmentClockStart > 0L &&
+            (_state.value.phase == SessionPhase.Recording ||
+                _state.value.phase == SessionPhase.Processing)
+        ) {
+            recordedElapsedMs += (System.currentTimeMillis() - segmentClockStart)
+            segmentClockStart = 0L
+        }
+    }
+
+    private fun ensureTimer() {
+        if (timerJob?.isActive == true) return
+        timerJob = scope.launch {
+            while (isActive) {
+                delay(500)
+                val phase = _state.value.phase
+                if (phase == SessionPhase.Recording || phase == SessionPhase.Processing) {
+                    val base = recordedElapsedMs
+                    val extra = if (segmentClockStart > 0) {
+                        System.currentTimeMillis() - segmentClockStart
+                    } else 0L
+                    _state.update {
+                        it.copy(recordedElapsedMs = base + extra)
+                    }
+                }
+            }
+        }
+    }
+
+    private fun stopTimer() {
+        timerJob?.cancel()
+        timerJob = null
     }
 
     private fun ensureWorker() {
@@ -167,8 +259,7 @@ class SessionOrchestrator(
             } catch (e: Exception) {
                 lastError = e
                 attempt++
-                val retryable = e is RetryableException || attempt < 3
-                if (!retryable || attempt >= 3) break
+                if (attempt >= 3) break
                 delay(500L * attempt * attempt)
             }
         }
@@ -205,7 +296,6 @@ class SessionOrchestrator(
         ).collect { ev ->
             when (ev) {
                 is AsrStreamEvent.Delta -> {
-                    // Delta carries merged display text; strip model meta tags
                     en = AsrOutputSanitizer.clean(ev.text)
                     _state.update { it.copy(partialEn = en) }
                 }
@@ -220,7 +310,6 @@ class SessionOrchestrator(
         en = AsrOutputSanitizer.clean(en)
 
         if (en.isBlank()) {
-            // Skip empty ASR; return to recording phase
             _state.update {
                 it.copy(
                     partialEn = "",
@@ -247,7 +336,6 @@ class SessionOrchestrator(
         ).collect { ev ->
             when (ev) {
                 is LlmStreamEvent.Delta -> {
-                    // Piece-only append
                     zh += ev.text
                     _state.update { it.copy(partialZh = zh) }
                 }
@@ -261,7 +349,16 @@ class SessionOrchestrator(
             }
         }
 
-        val seg = TranscriptSegment(en, zh, utt.reason, incomplete = false)
+        val now = System.currentTimeMillis()
+        val offset = if (sessionStartedAt > 0) now - sessionStartedAt else recordedElapsedMs
+        val seg = TranscriptSegment(
+            source = en,
+            translation = zh,
+            cutReason = utt.reason,
+            incomplete = false,
+            timestampMs = now,
+            offsetMs = offset
+        )
         contextWindow.addLast(ContextTurn(en, zh))
         while (contextWindow.size > windowSize.coerceAtLeast(0)) {
             contextWindow.removeFirst()

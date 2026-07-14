@@ -1,29 +1,36 @@
 package com.example.livetranslate.data.audio
 
 import android.annotation.SuppressLint
+import android.content.Context
+import android.media.AudioAttributes
 import android.media.AudioFormat
+import android.media.AudioPlaybackCaptureConfiguration
 import android.media.AudioRecord
 import android.media.MediaRecorder
+import android.media.projection.MediaProjection
+import android.os.Build
 import com.example.livetranslate.data.settings.UserSettings
+import com.example.livetranslate.domain.model.AudioSourceType
 import com.example.livetranslate.domain.model.UtteranceAudio
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
-import kotlinx.coroutines.isActive
-import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.asSharedFlow
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.launch
 
 /**
- * Continuous [AudioRecord] capture at 16 kHz mono PCM 16-bit.
+ * Continuous PCM capture at 16 kHz mono 16-bit.
  *
- * Audio is sliced into fixed frames (~20 ms). Each frame is fed to [EnergyVad],
- * which emits complete utterances on silence or max-duration force cut.
+ * - [AudioSourceType.Microphone]: VOICE_RECOGNITION mic
+ * - [AudioSourceType.Internal]: AudioPlaybackCapture (API 29+), needs [MediaProjection]
  */
 class AudioCapture(
     private val scope: CoroutineScope,
-    private val settings: () -> UserSettings
+    private val settings: () -> UserSettings,
+    private val appContext: Context
 ) {
     private val _utterances = MutableSharedFlow<UtteranceAudio>(extraBufferCapacity = 16)
     val utterances: SharedFlow<UtteranceAudio> = _utterances.asSharedFlow()
@@ -35,11 +42,26 @@ class AudioCapture(
     var isRecording: Boolean = false
         private set
 
+    @Volatile
+    var sourceType: AudioSourceType = AudioSourceType.Microphone
+
+    /** Required for [AudioSourceType.Internal]. Set before [start]. */
+    @Volatile
+    var mediaProjection: MediaProjection? = null
+
     private var job: Job? = null
     private var activeVad: EnergyVad? = null
 
     fun start() {
         if (running) return
+        if (sourceType == AudioSourceType.Internal) {
+            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
+                throw IllegalStateException("Internal audio requires Android 10+")
+            }
+            if (mediaProjection == null) {
+                throw IllegalStateException("MediaProjection not granted for internal audio")
+            }
+        }
         running = true
         isRecording = true
         job = scope.launch(Dispatchers.IO) { loop() }
@@ -52,7 +74,6 @@ class AudioCapture(
         job = null
         activeVad?.reset()
         activeVad = null
-        // Spec: do not flush on pause
     }
 
     fun stop(flush: Boolean = true) {
@@ -98,13 +119,14 @@ class AudioCapture(
             return
         }
 
-        val recorder = AudioRecord(
-            MediaRecorder.AudioSource.VOICE_RECOGNITION,
-            SAMPLE_RATE,
-            AudioFormat.CHANNEL_IN_MONO,
-            AudioFormat.ENCODING_PCM_16BIT,
-            (minBuf * 2).coerceAtLeast(frameSamples * 4)
-        )
+        val bufferSize = (minBuf * 2).coerceAtLeast(frameSamples * 4)
+        val recorder = try {
+            createRecorder(bufferSize)
+        } catch (e: Exception) {
+            running = false
+            isRecording = false
+            return
+        }
 
         try {
             if (recorder.state != AudioRecord.STATE_INITIALIZED) {
@@ -117,7 +139,6 @@ class AudioCapture(
                 if (read != frame.size) continue
                 val result = vad.accept(frame)
                 result.emit?.let { emit ->
-                    // Complete utterance ready for serial ASR → LLM pipeline.
                     _utterances.tryEmit(
                         UtteranceAudio(emit.pcm, SAMPLE_RATE, emit.reason)
                     )
@@ -130,6 +151,39 @@ class AudioCapture(
             }
             recorder.release()
             if (activeVad === vad) activeVad = null
+        }
+    }
+
+    @SuppressLint("MissingPermission")
+    private fun createRecorder(bufferSize: Int): AudioRecord {
+        return if (sourceType == AudioSourceType.Internal &&
+            Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q
+        ) {
+            val projection = mediaProjection
+                ?: throw IllegalStateException("MediaProjection is null")
+            val config = AudioPlaybackCaptureConfiguration.Builder(projection)
+                .addMatchingUsage(AudioAttributes.USAGE_MEDIA)
+                .addMatchingUsage(AudioAttributes.USAGE_GAME)
+                .addMatchingUsage(AudioAttributes.USAGE_UNKNOWN)
+                .build()
+            val format = AudioFormat.Builder()
+                .setEncoding(AudioFormat.ENCODING_PCM_16BIT)
+                .setSampleRate(SAMPLE_RATE)
+                .setChannelMask(AudioFormat.CHANNEL_IN_MONO)
+                .build()
+            AudioRecord.Builder()
+                .setAudioFormat(format)
+                .setBufferSizeInBytes(bufferSize)
+                .setAudioPlaybackCaptureConfig(config)
+                .build()
+        } else {
+            AudioRecord(
+                MediaRecorder.AudioSource.VOICE_RECOGNITION,
+                SAMPLE_RATE,
+                AudioFormat.CHANNEL_IN_MONO,
+                AudioFormat.ENCODING_PCM_16BIT,
+                bufferSize
+            )
         }
     }
 

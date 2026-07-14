@@ -1,4 +1,13 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">Live Translate</string>
+    <string name="notif_channel_recording">Recording</string>
+    <string name="notif_channel_recording_desc">Shows live translate recording status and duration</string>
+    <string name="notif_recording">Translating…</string>
+    <string name="notif_paused">Paused</string>
+    <string name="notif_processing">Processing utterance…</string>
+    <string name="notif_duration">Duration %1$s</string>
+    <string name="notif_pause">Pause</string>
+    <string name="notif_resume">Resume</string>
+    <string name="notif_stop">Stop &amp; save</string>
 </resources>

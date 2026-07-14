@@ -2,6 +2,14 @@ package com.example.livetranslate.domain.model
 
 enum class CutReason { Silence, MaxDuration, StopFlush }
 
+/** Where PCM samples come from. */
+enum class AudioSourceType {
+    /** Device microphone */
+    Microphone,
+    /** Other apps' playback (internal audio, API 29+) */
+    Internal
+}
+
 data class UtteranceAudio(
     val pcm: ByteArray,
     val sampleRate: Int,
@@ -28,7 +36,6 @@ sealed class AsrStreamEvent {
 }
 
 sealed class LlmStreamEvent {
-    /** Incremental piece only (append). */
     data class Delta(val text: String) : LlmStreamEvent()
     data class Completed(val fullText: String) : LlmStreamEvent()
     data class Error(val throwable: Throwable, val retryable: Boolean) : LlmStreamEvent()
@@ -40,5 +47,9 @@ data class TranscriptSegment(
     val source: String,
     val translation: String,
     val cutReason: CutReason?,
-    val incomplete: Boolean = false
+    val incomplete: Boolean = false,
+    /** Absolute wall-clock ms when the segment was finalized. */
+    val timestampMs: Long = System.currentTimeMillis(),
+    /** ms since session start. */
+    val offsetMs: Long = 0L
 )
