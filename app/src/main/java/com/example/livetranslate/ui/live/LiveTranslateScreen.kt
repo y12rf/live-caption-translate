@@ -67,17 +67,6 @@ fun LiveTranslateScreen(
     val zhScroll = rememberScrollState()
     var pendingStartSource by remember { mutableStateOf(AudioSourceType.Microphone) }
 
-    val permissionLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.RequestMultiplePermissions()
-    ) { results ->
-        val audioOk = results[Manifest.permission.RECORD_AUDIO] == true ||
-            ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) ==
-            PackageManager.PERMISSION_GRANTED
-        if (audioOk) {
-            beginCapture(context, viewModel, pendingStartSource, null, null)
-        }
-    }
-
     val projectionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.StartActivityForResult()
     ) { result ->
@@ -89,6 +78,33 @@ fun LiveTranslateScreen(
                 result.resultCode,
                 result.data
             )
+        } else {
+            android.widget.Toast.makeText(
+                context,
+                "未授予录屏/内部音频权限，无法使用 Internal",
+                android.widget.Toast.LENGTH_LONG
+            ).show()
+        }
+    }
+
+    fun launchInternalProjection() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) return
+        val mpm = context.getSystemService(MediaProjectionManager::class.java)
+        projectionLauncher.launch(mpm.createScreenCaptureIntent())
+    }
+
+    val permissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestMultiplePermissions()
+    ) { results ->
+        val audioOk = results[Manifest.permission.RECORD_AUDIO] == true ||
+            ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) ==
+            PackageManager.PERMISSION_GRANTED
+        if (!audioOk) return@rememberLauncherForActivityResult
+        // After mic permission, Internal still needs MediaProjection dialog.
+        when (pendingStartSource) {
+            AudioSourceType.Internal -> launchInternalProjection()
+            AudioSourceType.Microphone ->
+                beginCapture(context, viewModel, AudioSourceType.Microphone, null, null)
         }
     }
 
@@ -106,11 +122,7 @@ fun LiveTranslateScreen(
             return
         }
         if (source == AudioSourceType.Internal) {
-            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
-                return
-            }
-            val mpm = context.getSystemService(MediaProjectionManager::class.java)
-            projectionLauncher.launch(mpm.createScreenCaptureIntent())
+            launchInternalProjection()
         } else {
             beginCapture(context, viewModel, source, null, null)
         }
@@ -303,13 +315,29 @@ private fun beginCapture(
     data: Intent?
 ) {
     viewModel.setAudioSource(source)
-    if (source == AudioSourceType.Internal && resultCode != null && data != null) {
-        RecordingService.start(context, source, resultCode, data)
-    } else {
-        RecordingService.start(context, source)
-    }
-    if (viewModel.state.value.overlayEnabled) {
-        SubtitleOverlayService.start(context)
+    try {
+        if (source == AudioSourceType.Internal) {
+            if (resultCode == null || data == null) {
+                android.widget.Toast.makeText(
+                    context,
+                    "内部录音缺少系统授权结果，请重新点 Start 并允许录制",
+                    android.widget.Toast.LENGTH_LONG
+                ).show()
+                return
+            }
+            RecordingService.start(context, source, resultCode, data)
+        } else {
+            RecordingService.start(context, source)
+        }
+        if (viewModel.state.value.overlayEnabled) {
+            SubtitleOverlayService.start(context)
+        }
+    } catch (e: Exception) {
+        android.widget.Toast.makeText(
+            context,
+            e.message ?: "启动录音失败",
+            android.widget.Toast.LENGTH_LONG
+        ).show()
     }
 }
 

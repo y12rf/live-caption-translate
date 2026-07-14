@@ -127,17 +127,28 @@ class RecordingService : Service() {
 
         // 2) Internal audio: create MediaProjection + register callback
         if (source == AudioSourceType.Internal) {
-            val token = ProjectionTokenStore.take()
+            val token = ProjectionTokenStore.peek()
                 ?: throw IllegalStateException(
-                    "内部录音授权丢失，请重新点 Start 并完成录屏授权"
+                    "内部录音未获得 MediaProjection 授权：请点 Start 后完成「录制/投射」系统授权（不要只开麦克风）"
                 )
             val (resultCode, data) = token
+            Log.i(TAG, "getMediaProjection resultCode=$resultCode")
             val mpm = getSystemService(Context.MEDIA_PROJECTION_SERVICE)
                 as MediaProjectionManager
-            val proj = mpm.getMediaProjection(resultCode, data)
-                ?: throw IllegalStateException("无法创建 MediaProjection，请重试授权")
+            val proj = try {
+                mpm.getMediaProjection(resultCode, data)
+            } catch (e: SecurityException) {
+                ProjectionTokenStore.consume()
+                throw IllegalStateException(
+                    "MediaProjection 被拒绝：请确保前台服务类型含 MEDIA_PROJECTION，并重新授权。${e.message}",
+                    e
+                )
+            } ?: run {
+                ProjectionTokenStore.consume()
+                throw IllegalStateException("无法创建 MediaProjection，请重试授权")
+            }
 
-            // Register callback on all API levels that support it (required on 14+, good on 13)
+            // Required before capture on API 34+; also register on API 35 Pixel
             try {
                 proj.registerCallback(projectionCallback, mainHandler)
             } catch (t: Throwable) {
@@ -145,17 +156,29 @@ class RecordingService : Service() {
             }
             projection = proj
             controller.setMediaProjection(proj)
+            // Token consumed only after successful MediaProjection creation
+            ProjectionTokenStore.consume()
         }
 
-        // 3) Start capture after a short delay so OEM MediaProjection is fully ready (Android 12–13)
+        // 3) Start capture after a short delay (OEM / Pixel readiness)
+        val delayMs = if (source == AudioSourceType.Internal) 300L else 0L
         mainHandler.postDelayed({
             try {
+                if (source == AudioSourceType.Internal &&
+                    controller.audio.mediaProjection == null
+                ) {
+                    reportError(
+                        controller,
+                        IllegalStateException("内部录音未获得 MediaProjection 授权（启动时已丢失）")
+                    )
+                    return@postDelayed
+                }
                 controller.start()
             } catch (e: Exception) {
                 Log.e(TAG, "delayed start failed", e)
                 reportError(controller, e)
             }
-        }, if (source == AudioSourceType.Internal) 200L else 0L)
+        }, delayMs)
 
         observeJob?.cancel()
         observeJob = scope.launch {
@@ -325,16 +348,24 @@ class RecordingService : Service() {
             projectionResultCode: Int? = null,
             projectionData: Intent? = null
         ) {
-            if (source == AudioSourceType.Internal &&
-                projectionResultCode != null &&
-                projectionData != null
-            ) {
+            if (source == AudioSourceType.Internal) {
+                if (projectionResultCode == null || projectionData == null) {
+                    Log.e(TAG, "Internal start without projection token — refuse")
+                    throw IllegalArgumentException(
+                        "内部录音必须先完成系统录屏授权"
+                    )
+                }
+                // RESULT_OK == -1
+                if (projectionResultCode != android.app.Activity.RESULT_OK) {
+                    throw IllegalArgumentException(
+                        "录屏授权未成功 resultCode=$projectionResultCode"
+                    )
+                }
                 ProjectionTokenStore.put(projectionResultCode, projectionData)
             }
             val i = Intent(context, RecordingService::class.java).apply {
                 action = ACTION_START
                 putExtra(EXTRA_AUDIO_SOURCE, source.name)
-                // Do NOT put projection Intent in extras — use ProjectionTokenStore
             }
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                 context.startForegroundService(i)
