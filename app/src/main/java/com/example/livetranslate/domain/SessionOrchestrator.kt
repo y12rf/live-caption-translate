@@ -197,7 +197,9 @@ class SessionOrchestrator(
                 baseUrl = settings.normalizedAsrBaseUrl(),
                 apiKey = settings.asrApiKey,
                 model = settings.asrModel,
-                language = settings.inputLanguage
+                language = settings.inputLanguage,
+                apiStyle = settings.asrApiStyleEnum(),
+                authStyle = settings.asrAuthStyleEnum()
             )
         ).collect { ev ->
             when (ev) {
@@ -236,7 +238,8 @@ class SessionOrchestrator(
                 model = settings.llmModel,
                 targetLanguage = settings.outputLanguage,
                 sourceLanguage = settings.inputLanguage,
-                systemPrompt = settings.renderLlmSystemPrompt()
+                systemPrompt = settings.renderLlmSystemPrompt(),
+                authStyle = settings.llmAuthStyleEnum()
             )
         ).collect { ev ->
             when (ev) {

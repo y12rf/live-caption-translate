@@ -1,5 +1,7 @@
 package com.example.livetranslate.data.llm
 
+import com.example.livetranslate.data.asr.ApiAuthStyle
+
 data class LlmConfig(
     val baseUrl: String,
     val apiKey: String,
@@ -10,5 +12,6 @@ data class LlmConfig(
      * Already-rendered system prompt (placeholders like {{to}} resolved by caller),
      * or a template that [LlmClient] will render if it still contains placeholders.
      */
-    val systemPrompt: String
+    val systemPrompt: String,
+    val authStyle: ApiAuthStyle = ApiAuthStyle.Bearer
 )

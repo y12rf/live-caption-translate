@@ -1,12 +1,19 @@
 package com.example.livetranslate.data.settings
 
+import com.example.livetranslate.data.asr.ApiAuthStyle
+import com.example.livetranslate.data.asr.AsrApiStyle
+
 data class UserSettings(
     val asrBaseUrl: String = "https://api.openai.com",
     val asrApiKey: String = "",
     val asrModel: String = "whisper-1",
+    /** transcriptions = OpenAI Whisper multipart; chat_audio = MIMO-style chat+base64 */
+    val asrApiStyle: String = AsrApiStyle.OpenAiTranscriptions.name,
+    val asrAuthStyle: String = ApiAuthStyle.Bearer.name,
     val llmBaseUrl: String = "https://api.openai.com",
     val llmApiKey: String = "",
     val llmModel: String = "gpt-4o-mini",
+    val llmAuthStyle: String = ApiAuthStyle.Bearer.name,
     /**
      * LLM system prompt template. Placeholders:
      * - `{{to}}` → output language (e.g. zh / Chinese)
@@ -23,6 +30,15 @@ data class UserSettings(
 ) {
     fun normalizedAsrBaseUrl(): String = normalizeBaseUrl(asrBaseUrl)
     fun normalizedLlmBaseUrl(): String = normalizeBaseUrl(llmBaseUrl)
+
+    fun asrApiStyleEnum(): AsrApiStyle =
+        runCatching { AsrApiStyle.valueOf(asrApiStyle) }.getOrDefault(AsrApiStyle.OpenAiTranscriptions)
+
+    fun asrAuthStyleEnum(): ApiAuthStyle =
+        runCatching { ApiAuthStyle.valueOf(asrAuthStyle) }.getOrDefault(ApiAuthStyle.Bearer)
+
+    fun llmAuthStyleEnum(): ApiAuthStyle =
+        runCatching { ApiAuthStyle.valueOf(llmAuthStyle) }.getOrDefault(ApiAuthStyle.Bearer)
 
     fun renderLlmSystemPrompt(): String =
         llmSystemPrompt

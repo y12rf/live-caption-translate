@@ -24,6 +24,8 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.example.livetranslate.data.asr.ApiAuthStyle
+import com.example.livetranslate.data.asr.AsrApiStyle
 import com.example.livetranslate.data.settings.UserSettings
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -54,8 +56,8 @@ fun SettingsScreen(
                 .padding(16.dp)
                 .verticalScroll(rememberScrollState())
         ) {
-            Text("ASR (OpenAI-compatible)")
-            field("Base URL", d.asrBaseUrl) {
+            Text("ASR")
+            field("Base URL (no path, or .../v1 ok)", d.asrBaseUrl) {
                 viewModel.updateDraft { s -> s.copy(asrBaseUrl = it) }
             }
             field("API Key", d.asrApiKey) {
@@ -64,9 +66,45 @@ fun SettingsScreen(
             field("Model", d.asrModel) {
                 viewModel.updateDraft { s -> s.copy(asrModel = it) }
             }
+            field(
+                "ASR style: OpenAiTranscriptions | ChatCompletionsAudio",
+                d.asrApiStyle
+            ) {
+                viewModel.updateDraft { s -> s.copy(asrApiStyle = it.trim()) }
+            }
+            Text(
+                "MIMO ASR → ChatCompletionsAudio; classic Whisper → OpenAiTranscriptions",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            field(
+                "ASR auth: Bearer | ApiKeyHeader",
+                d.asrAuthStyle
+            ) {
+                viewModel.updateDraft { s -> s.copy(asrAuthStyle = it.trim()) }
+            }
+            Text(
+                "MIMO uses ApiKeyHeader (header api-key); OpenAI uses Bearer",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Button(
+                onClick = {
+                    viewModel.updateDraft { s ->
+                        s.copy(
+                            asrBaseUrl = "https://api.xiaomimimo.com",
+                            asrModel = "mimo-v2.5-asr",
+                            asrApiStyle = AsrApiStyle.ChatCompletionsAudio.name,
+                            asrAuthStyle = ApiAuthStyle.ApiKeyHeader.name,
+                            inputLanguage = "auto"
+                        )
+                    }
+                },
+                modifier = Modifier.fillMaxWidth()
+            ) { Text("Fill MIMO ASR defaults") }
 
             Spacer(Modifier.height(16.dp))
-            Text("LLM (OpenAI-compatible)")
+            Text("LLM (chat completions stream)")
             field("Base URL", d.llmBaseUrl) {
                 viewModel.updateDraft { s -> s.copy(llmBaseUrl = it) }
             }
@@ -75,6 +113,12 @@ fun SettingsScreen(
             }
             field("Model", d.llmModel) {
                 viewModel.updateDraft { s -> s.copy(llmModel = it) }
+            }
+            field(
+                "LLM auth: Bearer | ApiKeyHeader",
+                d.llmAuthStyle
+            ) {
+                viewModel.updateDraft { s -> s.copy(llmAuthStyle = it.trim()) }
             }
             multilineField(
                 label = "Translation system prompt",

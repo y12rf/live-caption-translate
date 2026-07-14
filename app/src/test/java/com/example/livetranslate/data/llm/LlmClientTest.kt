@@ -41,7 +41,8 @@ class LlmClientTest {
                     model = "gpt-4o-mini",
                     targetLanguage = "zh",
                     sourceLanguage = "en",
-                    systemPrompt = "你是一位精通 {{to}} 专业母语译者，致力于提供流畅、地道、符合表达习惯且高保真的翻译。"
+                    systemPrompt = "你是一位精通 {{to}} 专业母语译者，致力于提供流畅、地道、符合表达习惯且高保真的翻译。",
+                    authStyle = com.example.livetranslate.data.asr.ApiAuthStyle.Bearer
                 )
             ).toList()
             val pieces = events.filterIsInstance<LlmStreamEvent.Delta>().map { it.text }

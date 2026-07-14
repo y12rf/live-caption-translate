@@ -19,9 +19,12 @@ class SettingsRepository(private val context: Context) {
         val asrBaseUrl = stringPreferencesKey("asr_base_url")
         val asrApiKey = stringPreferencesKey("asr_api_key")
         val asrModel = stringPreferencesKey("asr_model")
+        val asrApiStyle = stringPreferencesKey("asr_api_style")
+        val asrAuthStyle = stringPreferencesKey("asr_auth_style")
         val llmBaseUrl = stringPreferencesKey("llm_base_url")
         val llmApiKey = stringPreferencesKey("llm_api_key")
         val llmModel = stringPreferencesKey("llm_model")
+        val llmAuthStyle = stringPreferencesKey("llm_auth_style")
         val llmSystemPrompt = stringPreferencesKey("llm_system_prompt")
         val inputLanguage = stringPreferencesKey("input_language")
         val outputLanguage = stringPreferencesKey("output_language")
@@ -38,9 +41,12 @@ class SettingsRepository(private val context: Context) {
             asrBaseUrl = p[Keys.asrBaseUrl] ?: defaults.asrBaseUrl,
             asrApiKey = p[Keys.asrApiKey] ?: defaults.asrApiKey,
             asrModel = p[Keys.asrModel] ?: defaults.asrModel,
+            asrApiStyle = p[Keys.asrApiStyle] ?: defaults.asrApiStyle,
+            asrAuthStyle = p[Keys.asrAuthStyle] ?: defaults.asrAuthStyle,
             llmBaseUrl = p[Keys.llmBaseUrl] ?: defaults.llmBaseUrl,
             llmApiKey = p[Keys.llmApiKey] ?: defaults.llmApiKey,
             llmModel = p[Keys.llmModel] ?: defaults.llmModel,
+            llmAuthStyle = p[Keys.llmAuthStyle] ?: defaults.llmAuthStyle,
             llmSystemPrompt = p[Keys.llmSystemPrompt] ?: defaults.llmSystemPrompt,
             inputLanguage = p[Keys.inputLanguage] ?: defaults.inputLanguage,
             outputLanguage = p[Keys.outputLanguage] ?: defaults.outputLanguage,
@@ -54,31 +60,36 @@ class SettingsRepository(private val context: Context) {
 
     suspend fun update(transform: (UserSettings) -> UserSettings) {
         context.dataStore.edit { prefs ->
-            // Read current from prefs snapshot via defaults merge
+            val d = UserSettings()
             val current = UserSettings(
-                asrBaseUrl = prefs[Keys.asrBaseUrl] ?: UserSettings().asrBaseUrl,
+                asrBaseUrl = prefs[Keys.asrBaseUrl] ?: d.asrBaseUrl,
                 asrApiKey = prefs[Keys.asrApiKey] ?: "",
-                asrModel = prefs[Keys.asrModel] ?: UserSettings().asrModel,
-                llmBaseUrl = prefs[Keys.llmBaseUrl] ?: UserSettings().llmBaseUrl,
+                asrModel = prefs[Keys.asrModel] ?: d.asrModel,
+                asrApiStyle = prefs[Keys.asrApiStyle] ?: d.asrApiStyle,
+                asrAuthStyle = prefs[Keys.asrAuthStyle] ?: d.asrAuthStyle,
+                llmBaseUrl = prefs[Keys.llmBaseUrl] ?: d.llmBaseUrl,
                 llmApiKey = prefs[Keys.llmApiKey] ?: "",
-                llmModel = prefs[Keys.llmModel] ?: UserSettings().llmModel,
-                llmSystemPrompt = prefs[Keys.llmSystemPrompt]
-                    ?: UserSettings().llmSystemPrompt,
-                inputLanguage = prefs[Keys.inputLanguage] ?: UserSettings().inputLanguage,
-                outputLanguage = prefs[Keys.outputLanguage] ?: UserSettings().outputLanguage,
-                silenceMs = prefs[Keys.silenceMs] ?: UserSettings().silenceMs,
-                maxUtteranceMs = prefs[Keys.maxUtteranceMs] ?: UserSettings().maxUtteranceMs,
-                minUtteranceMs = prefs[Keys.minUtteranceMs] ?: UserSettings().minUtteranceMs,
-                energyThreshold = prefs[Keys.energyThreshold] ?: UserSettings().energyThreshold,
-                contextWindowSize = prefs[Keys.contextWindowSize] ?: UserSettings().contextWindowSize
+                llmModel = prefs[Keys.llmModel] ?: d.llmModel,
+                llmAuthStyle = prefs[Keys.llmAuthStyle] ?: d.llmAuthStyle,
+                llmSystemPrompt = prefs[Keys.llmSystemPrompt] ?: d.llmSystemPrompt,
+                inputLanguage = prefs[Keys.inputLanguage] ?: d.inputLanguage,
+                outputLanguage = prefs[Keys.outputLanguage] ?: d.outputLanguage,
+                silenceMs = prefs[Keys.silenceMs] ?: d.silenceMs,
+                maxUtteranceMs = prefs[Keys.maxUtteranceMs] ?: d.maxUtteranceMs,
+                minUtteranceMs = prefs[Keys.minUtteranceMs] ?: d.minUtteranceMs,
+                energyThreshold = prefs[Keys.energyThreshold] ?: d.energyThreshold,
+                contextWindowSize = prefs[Keys.contextWindowSize] ?: d.contextWindowSize
             )
             val next = transform(current)
             prefs[Keys.asrBaseUrl] = UserSettings.normalizeBaseUrl(next.asrBaseUrl)
             prefs[Keys.asrApiKey] = next.asrApiKey
             prefs[Keys.asrModel] = next.asrModel
+            prefs[Keys.asrApiStyle] = next.asrApiStyle
+            prefs[Keys.asrAuthStyle] = next.asrAuthStyle
             prefs[Keys.llmBaseUrl] = UserSettings.normalizeBaseUrl(next.llmBaseUrl)
             prefs[Keys.llmApiKey] = next.llmApiKey
             prefs[Keys.llmModel] = next.llmModel
+            prefs[Keys.llmAuthStyle] = next.llmAuthStyle
             prefs[Keys.llmSystemPrompt] = next.llmSystemPrompt.ifBlank {
                 UserSettings.DEFAULT_LLM_SYSTEM_PROMPT
             }

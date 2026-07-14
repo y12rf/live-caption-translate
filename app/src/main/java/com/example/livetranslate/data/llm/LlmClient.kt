@@ -12,6 +12,8 @@ import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
+import com.example.livetranslate.data.asr.ApiAuthStyle
+import com.example.livetranslate.data.asr.AsrClient.Companion.applyAuth
 import com.example.livetranslate.data.network.JsonLite
 import java.io.IOException
 
@@ -28,8 +30,8 @@ class LlmClient(
         context: List<ContextTurn>,
         config: LlmConfig
     ): Flow<LlmStreamEvent> = callbackFlow {
-        val base = config.baseUrl.trim().trimEnd('/')
-        val url = "$base/v1/chat/completions"
+        val root = config.baseUrl.trim().trimEnd('/').removeSuffix("/v1")
+        val url = "$root/v1/chat/completions"
 
         val historyBlock = if (context.isEmpty()) {
             "(none)"
@@ -76,7 +78,7 @@ class LlmClient(
 
         val request = Request.Builder()
             .url(url)
-            .header("Authorization", "Bearer ${config.apiKey}")
+            .applyAuth(config.authStyle, config.apiKey)
             .header("Content-Type", "application/json")
             .post(bodyJson.toRequestBody("application/json".toMediaType()))
             .build()
