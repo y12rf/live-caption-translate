@@ -2,6 +2,7 @@ package com.example.livetranslate.domain
 
 import com.example.livetranslate.data.asr.AsrClient
 import com.example.livetranslate.data.asr.AsrConfig
+import com.example.livetranslate.data.asr.AsrOutputSanitizer
 import com.example.livetranslate.data.audio.AudioCapture
 import com.example.livetranslate.data.history.HistoryRepository
 import com.example.livetranslate.data.llm.LlmClient
@@ -204,17 +205,19 @@ class SessionOrchestrator(
         ).collect { ev ->
             when (ev) {
                 is AsrStreamEvent.Delta -> {
-                    // Delta carries merged display text
-                    en = ev.text
+                    // Delta carries merged display text; strip model meta tags
+                    en = AsrOutputSanitizer.clean(ev.text)
                     _state.update { it.copy(partialEn = en) }
                 }
-                is AsrStreamEvent.Completed -> en = ev.fullText
+                is AsrStreamEvent.Completed ->
+                    en = AsrOutputSanitizer.clean(ev.fullText)
                 is AsrStreamEvent.Error -> {
                     if (ev.retryable) throw RetryableException(ev.throwable)
                     else throw ev.throwable
                 }
             }
         }
+        en = AsrOutputSanitizer.clean(en)
 
         if (en.isBlank()) {
             // Skip empty ASR; return to recording phase
