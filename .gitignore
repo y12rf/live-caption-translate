@@ -6,3 +6,9 @@
 local.properties
 *.iml
 .DS_Store
+captures/
+.externalNativeBuild/
+.cxx/
+*.apk
+*.ap_
+*.aab
