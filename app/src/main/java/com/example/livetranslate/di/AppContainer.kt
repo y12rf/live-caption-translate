@@ -44,5 +44,6 @@ class AppContainer(context: Context) {
                 sessionController.updateCachedSettings(it)
             }
         }
+        sessionController.observeCaptureErrors()
     }
 }

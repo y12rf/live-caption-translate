@@ -60,4 +60,15 @@ class SessionController(
     fun stop() = orchestrator.stop()
     fun retry() = orchestrator.retryLastFailed()
     fun exportMarkdown(): String? = orchestrator.exportMarkdown()
+
+    /** Observe capture-thread failures (e.g. internal audio init on OEM). */
+    fun observeCaptureErrors() {
+        appScope.launch {
+            audio.captureError.collect { msg ->
+                if (msg != null) {
+                    orchestrator.reportCaptureError(msg)
+                }
+            }
+        }
+    }
 }

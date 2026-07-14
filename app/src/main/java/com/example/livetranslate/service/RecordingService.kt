@@ -11,7 +11,10 @@ import android.content.pm.ServiceInfo
 import android.media.projection.MediaProjection
 import android.media.projection.MediaProjectionManager
 import android.os.Build
+import android.os.Handler
 import android.os.IBinder
+import android.os.Looper
+import android.util.Log
 import androidx.core.app.NotificationCompat
 import com.example.livetranslate.LiveTranslateApp
 import com.example.livetranslate.MainActivity
@@ -29,12 +32,30 @@ import kotlinx.coroutines.launch
 
 /**
  * Foreground service: keep-alive + notification with duration and Pause / Stop.
+ *
+ * Internal audio path (MediaProjection) is hardened for real devices / Android 14+:
+ * - startForeground (mediaProjection type) BEFORE getMediaProjection
+ * - register MediaProjection.Callback before any capture use
+ * - consent Intent kept in-process via [ProjectionTokenStore]
  */
 class RecordingService : Service() {
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private var observeJob: Job? = null
     private var projection: MediaProjection? = null
+    private val mainHandler = Handler(Looper.getMainLooper())
+
+    private val projectionCallback = object : MediaProjection.Callback() {
+        override fun onStop() {
+            Log.i(TAG, "MediaProjection stopped by system")
+            try {
+                val controller = (application as LiveTranslateApp).container.sessionController
+                controller.pause()
+            } catch (e: Exception) {
+                Log.w(TAG, "onStop handling failed", e)
+            }
+        }
+    }
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -49,15 +70,29 @@ class RecordingService : Service() {
 
         when (intent?.action) {
             ACTION_PAUSE -> {
-                controller.pause()
+                try {
+                    controller.pause()
+                } catch (e: Exception) {
+                    Log.e(TAG, "pause failed", e)
+                }
                 return START_STICKY
             }
             ACTION_RESUME -> {
-                controller.start()
+                try {
+                    controller.start()
+                } catch (e: Exception) {
+                    Log.e(TAG, "resume failed", e)
+                    reportError(controller, e)
+                }
                 return START_STICKY
             }
             ACTION_STOP -> {
-                controller.stop()
+                try {
+                    controller.stop()
+                } catch (e: Exception) {
+                    Log.e(TAG, "stop failed", e)
+                }
+                releaseProjection()
                 stopOverlay()
                 stopSelf()
                 return START_NOT_STICKY
@@ -66,83 +101,156 @@ class RecordingService : Service() {
                 val source = intent?.getStringExtra(EXTRA_AUDIO_SOURCE)
                     ?.let { runCatching { AudioSourceType.valueOf(it) }.getOrNull() }
                     ?: AudioSourceType.Microphone
-                controller.setAudioSource(source)
 
-                // Must enter foreground before getMediaProjection on Android 14+
-                val notif = buildNotification(
-                    phase = SessionPhase.Recording,
-                    elapsedMs = 0L
-                )
-                startAsForeground(source, notif)
-
-                if (source == AudioSourceType.Internal) {
-                    val resultCode = intent?.getIntExtra(EXTRA_RESULT_CODE, 0) ?: 0
-                    val data = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                        intent?.getParcelableExtra(EXTRA_PROJECTION_DATA, Intent::class.java)
-                    } else {
-                        @Suppress("DEPRECATION")
-                        intent?.getParcelableExtra(EXTRA_PROJECTION_DATA)
-                    }
-                    if (resultCode != 0 && data != null) {
-                        val mpm = getSystemService(Context.MEDIA_PROJECTION_SERVICE)
-                            as MediaProjectionManager
-                        projection = mpm.getMediaProjection(resultCode, data)
-                        controller.setMediaProjection(projection)
-                    }
-                }
-
-                controller.start()
-                observeJob?.cancel()
-                observeJob = scope.launch {
-                    controller.state.collectLatest { st ->
-                        val n = buildNotification(st.phase, st.recordedElapsedMs)
-                        val nm = getSystemService(NotificationManager::class.java)
-                        nm.notify(NOTIF_ID, n)
-                        if (st.phase == SessionPhase.Idle) {
-                            stopOverlay()
-                            stopSelf()
-                        }
-                    }
+                try {
+                    startRecordingSession(controller, source)
+                } catch (e: Exception) {
+                    Log.e(TAG, "startRecordingSession failed", e)
+                    reportError(controller, e)
+                    stopSelf()
+                    return START_NOT_STICKY
                 }
             }
         }
         return START_STICKY
     }
 
-    private fun startAsForeground(source: AudioSourceType, notif: Notification) {
-        if (Build.VERSION.SDK_INT >= 34) {
-            var type = ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
-            if (source == AudioSourceType.Internal) {
-                type = type or ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION
+    private fun startRecordingSession(
+        controller: com.example.livetranslate.domain.SessionController,
+        source: AudioSourceType
+    ) {
+        controller.setAudioSource(source)
+
+        // 1) Foreground first (Android 14 requires this before getMediaProjection)
+        val notif = buildNotification(SessionPhase.Recording, 0L)
+        startAsForeground(source, notif)
+
+        // 2) Internal audio: create MediaProjection + register callback
+        if (source == AudioSourceType.Internal) {
+            val token = ProjectionTokenStore.take()
+                ?: throw IllegalStateException(
+                    "内部录音授权丢失，请重新点 Start 并完成录屏授权"
+                )
+            val (resultCode, data) = token
+            val mpm = getSystemService(Context.MEDIA_PROJECTION_SERVICE)
+                as MediaProjectionManager
+            val proj = mpm.getMediaProjection(resultCode, data)
+                ?: throw IllegalStateException("无法创建 MediaProjection，请重试授权")
+
+            // Android 14+: must register callback before capture config / record
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+                proj.registerCallback(projectionCallback, mainHandler)
+            } else {
+                // Older versions also accept callback; register for stop events
+                try {
+                    proj.registerCallback(projectionCallback, mainHandler)
+                } catch (_: Throwable) {
+                    // Some API 29–33 builds may not need it
+                }
             }
-            startForeground(NOTIF_ID, notif, type)
-        } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            startForeground(
-                NOTIF_ID,
-                notif,
-                ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
-            )
-        } else {
-            startForeground(NOTIF_ID, notif)
+            projection = proj
+            controller.setMediaProjection(proj)
+        }
+
+        // 3) Start capture pipeline
+        controller.start()
+
+        observeJob?.cancel()
+        observeJob = scope.launch {
+            controller.state.collectLatest { st ->
+                try {
+                    val n = buildNotification(st.phase, st.recordedElapsedMs)
+                    getSystemService(NotificationManager::class.java).notify(NOTIF_ID, n)
+                } catch (e: Exception) {
+                    Log.w(TAG, "notify update failed", e)
+                }
+                if (st.phase == SessionPhase.Idle) {
+                    releaseProjection()
+                    stopOverlay()
+                    stopSelf()
+                }
+            }
         }
     }
 
+    private fun reportError(
+        controller: com.example.livetranslate.domain.SessionController,
+        e: Exception
+    ) {
+        try {
+            controller.pause()
+        } catch (_: Exception) {
+        }
+        // Surface message via a stop+error path: set error on state if possible
+        // SessionController has no setError; stop keeps UI recoverable
+        Log.e(TAG, "Recording error: ${e.message}", e)
+    }
+
+    private fun startAsForeground(source: AudioSourceType, notif: Notification) {
+        try {
+            if (Build.VERSION.SDK_INT >= 34) {
+                // Android 14+: match declared foregroundServiceType in manifest
+                var type = ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
+                if (source == AudioSourceType.Internal) {
+                    type = type or ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION
+                }
+                startForeground(NOTIF_ID, notif, type)
+            } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                // API 29–33: microphone type is enough; mediaProjection FGS type is API 34+
+                startForeground(
+                    NOTIF_ID,
+                    notif,
+                    ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
+                )
+            } else {
+                startForeground(NOTIF_ID, notif)
+            }
+        } catch (e: Exception) {
+            // Fallback: try without mediaProjection type if OEM rejects combo
+            Log.w(TAG, "startForeground typed failed, fallback", e)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                startForeground(
+                    NOTIF_ID,
+                    notif,
+                    ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
+                )
+            } else {
+                startForeground(NOTIF_ID, notif)
+            }
+        }
+    }
+
+    private fun releaseProjection() {
+        val p = projection
+        projection = null
+        if (p != null) {
+            try {
+                p.unregisterCallback(projectionCallback)
+            } catch (_: Exception) {
+            }
+            try {
+                p.stop()
+            } catch (_: Exception) {
+            }
+        }
+        (application as? LiveTranslateApp)
+            ?.container
+            ?.sessionController
+            ?.setMediaProjection(null)
+        ProjectionTokenStore.clear()
+    }
+
     private fun stopOverlay() {
-        stopService(Intent(this, SubtitleOverlayService::class.java))
+        try {
+            stopService(Intent(this, SubtitleOverlayService::class.java))
+        } catch (_: Exception) {
+        }
     }
 
     override fun onDestroy() {
         observeJob?.cancel()
         scope.cancel()
-        try {
-            projection?.stop()
-        } catch (_: Exception) {
-        }
-        projection = null
-        (application as? LiveTranslateApp)
-            ?.container
-            ?.sessionController
-            ?.setMediaProjection(null)
+        releaseProjection()
         super.onDestroy()
     }
 
@@ -193,7 +301,6 @@ class RecordingService : Service() {
             else -> getString(R.string.notif_recording)
         }
         val duration = HistoryExport.formatOffset(elapsedMs)
-
         val actionLabel = if (phase == SessionPhase.Paused) {
             getString(R.string.notif_resume)
         } else {
@@ -215,6 +322,7 @@ class RecordingService : Service() {
     }
 
     companion object {
+        private const val TAG = "RecordingService"
         const val CHANNEL_ID = "recording"
         const val NOTIF_ID = 1001
         const val ACTION_START = "com.example.livetranslate.action.START"
@@ -222,8 +330,6 @@ class RecordingService : Service() {
         const val ACTION_RESUME = "com.example.livetranslate.action.RESUME"
         const val ACTION_STOP = "com.example.livetranslate.action.STOP"
         const val EXTRA_AUDIO_SOURCE = "audio_source"
-        const val EXTRA_RESULT_CODE = "result_code"
-        const val EXTRA_PROJECTION_DATA = "projection_data"
 
         fun start(
             context: Context,
@@ -231,13 +337,16 @@ class RecordingService : Service() {
             projectionResultCode: Int? = null,
             projectionData: Intent? = null
         ) {
+            if (source == AudioSourceType.Internal &&
+                projectionResultCode != null &&
+                projectionData != null
+            ) {
+                ProjectionTokenStore.put(projectionResultCode, projectionData)
+            }
             val i = Intent(context, RecordingService::class.java).apply {
                 action = ACTION_START
                 putExtra(EXTRA_AUDIO_SOURCE, source.name)
-                if (projectionResultCode != null && projectionData != null) {
-                    putExtra(EXTRA_RESULT_CODE, projectionResultCode)
-                    putExtra(EXTRA_PROJECTION_DATA, projectionData)
-                }
+                // Do NOT put projection Intent in extras — use ProjectionTokenStore
             }
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                 context.startForegroundService(i)
@@ -247,9 +356,12 @@ class RecordingService : Service() {
         }
 
         fun stop(context: Context) {
-            context.startService(
-                Intent(context, RecordingService::class.java).setAction(ACTION_STOP)
-            )
+            val i = Intent(context, RecordingService::class.java).setAction(ACTION_STOP)
+            try {
+                context.startService(i)
+            } catch (e: Exception) {
+                Log.e(TAG, "stop service failed", e)
+            }
         }
     }
 }

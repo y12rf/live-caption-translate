@@ -83,6 +83,19 @@ class SessionOrchestrator(
         _state.update { it.copy(overlayEnabled = enabled) }
     }
 
+    /** Surface background capture failures (internal audio) to UI without crashing. */
+    fun reportCaptureError(message: String) {
+        audio.pause()
+        stopTimer()
+        _state.update {
+            it.copy(
+                phase = SessionPhase.Paused,
+                error = message,
+                canRetry = false
+            )
+        }
+    }
+
     fun start() {
         val current = _state.value.phase
         if (current == SessionPhase.Recording || current == SessionPhase.Processing) return
