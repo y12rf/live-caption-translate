@@ -10,7 +10,7 @@
 
 | 能力 | 说明 |
 |------|------|
-| 麦克风 / 内录 / 文件 | 麦克风；内部音频（API 29+，MediaProjection + 多采样率回退）；**本地文件**（FFmpeg 转 16k WAV → 与历史重跑相同的分块 ASR + 标点切句 + 翻译；≥10 句生成 LLM 标题） |
+| 麦克风 / 内录 / 文件 | 麦克风；内部音频（API 29+，MediaProjection + 多采样率回退）；**本地文件**（FFmpeg 转 16k WAV → VAD 切句后每 70 句一批 ASR + 标点切句翻译；≥10 句生成 LLM 标题） |
 | 切句 | 能量 VAD：静音切句 + `maxUtteranceMs` 强制截断 |
 | ASR / LLM | 流式 SSE；多鉴权风格；完整 URL 或 OpenAI 路径拼接 |
 | 管线 | ASR 与 LLM 分队列：下句 ASR 可与上句翻译并行，句序仍保证 FIFO |

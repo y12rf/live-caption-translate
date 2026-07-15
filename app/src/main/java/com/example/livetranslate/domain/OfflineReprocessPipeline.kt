@@ -270,8 +270,18 @@ class OfflineReprocessPipeline(
             activeAudioPath = audioPath
         )
 
+        // VAD cut sentences, pack every UTTERANCES_PER_ASR into one ASR upload.
         val chunks = try {
-            WavChunker.chunkPcm(file)
+            WavChunker.chunkByVad(file, settings, WavChunker.UTTERANCES_PER_ASR) { progress, _ ->
+                _state.update {
+                    it.copy(
+                        message = str(
+                            R.string.offline_vad_progress,
+                            (progress * 100).toInt()
+                        )
+                    )
+                }
+            }
         } catch (e: Exception) {
             throw Exception(str(R.string.offline_read_fail, e.message ?: ""))
         }

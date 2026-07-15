@@ -153,7 +153,8 @@
     <string name="offline_ffmpeg_pct">FFmpeg converting %1$d%%</string>
     <string name="offline_install_wav">Installing session audio…</string>
     <string name="offline_read_audio">Reading audio…</string>
-    <string name="offline_asr_progress">Recognizing %1$d/%2$d</string>
+    <string name="offline_vad_progress">VAD segmenting %1$d%%</string>
+    <string name="offline_asr_progress">Recognizing batch %1$d/%2$d</string>
     <string name="offline_translate_progress">Translating %1$d/%2$d</string>
     <string name="offline_saving">Saving session…</string>
     <string name="offline_saved">Saved: %1$s</string>

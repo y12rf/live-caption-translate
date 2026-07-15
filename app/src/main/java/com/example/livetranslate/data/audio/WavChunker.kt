@@ -1,13 +1,23 @@
 package com.example.livetranslate.data.audio
 
+import com.example.livetranslate.data.settings.UserSettings
+import com.example.livetranslate.domain.model.UtteranceAudio
+import kotlinx.coroutines.flow.toList
 import java.io.File
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 
 /**
- * Split a PCM WAV into fixed-duration mono 16-bit chunks for offline ASR.
+ * Offline ASR batching helpers.
+ *
+ * Preferred path: energy VAD → pack every [UTTERANCES_PER_ASR] sentences into one ASR upload.
+ * Legacy time-slice [chunkPcm] remains for tests / fallback.
  */
 object WavChunker {
+    /** VAD sentences packed into one ASR request. */
+    const val UTTERANCES_PER_ASR = 70
+
+    /** Legacy fixed-duration slice (ms). */
     const val DEFAULT_CHUNK_MS = 30_000
 
     data class PcmChunk(
@@ -15,7 +25,9 @@ object WavChunker {
         val sampleRate: Int,
         val index: Int,
         val total: Int,
-        val startMs: Long
+        val startMs: Long,
+        /** How many VAD utterances were merged into this ASR batch (0 if time-sliced). */
+        val utteranceCount: Int = 0
     ) {
         override fun equals(other: Any?): Boolean {
             if (this === other) return true
@@ -24,6 +36,7 @@ object WavChunker {
                 index == other.index &&
                 total == other.total &&
                 startMs == other.startMs &&
+                utteranceCount == other.utteranceCount &&
                 pcm.contentEquals(other.pcm)
         }
 
@@ -33,7 +46,54 @@ object WavChunker {
             h = 31 * h + index
             h = 31 * h + total
             h = 31 * h + startMs.hashCode()
+            h = 31 * h + utteranceCount
             return h
+        }
+    }
+
+    /**
+     * Energy VAD over the whole WAV, then merge every [utterancesPerBatch] cuts into one PCM blob for ASR.
+     * Last batch may be shorter than [utterancesPerBatch].
+     */
+    suspend fun chunkByVad(
+        file: File,
+        settings: UserSettings,
+        utterancesPerBatch: Int = UTTERANCES_PER_ASR,
+        onProgress: (progress: Float, elapsedMs: Long) -> Unit = { _, _ -> }
+    ): List<PcmChunk> {
+        require(utterancesPerBatch > 0)
+        val segmenter = FileAudioSegmenter()
+        val utterances = segmenter.segment(file, settings, onProgress).toList()
+        return packVadUtterances(utterances, utterancesPerBatch)
+    }
+
+    /**
+     * Pack already-cut VAD utterances into ASR batches of [utterancesPerBatch].
+     */
+    fun packVadUtterances(
+        utterances: List<UtteranceAudio>,
+        utterancesPerBatch: Int = UTTERANCES_PER_ASR
+    ): List<PcmChunk> {
+        require(utterancesPerBatch > 0)
+        if (utterances.isEmpty()) return emptyList()
+        val groups = utterances.chunked(utterancesPerBatch)
+        return groups.mapIndexed { index, group ->
+            val sampleRate = group.first().sampleRate
+            val totalBytes = group.sumOf { it.pcm.size }
+            val pcm = ByteArray(totalBytes)
+            var pos = 0
+            for (u in group) {
+                System.arraycopy(u.pcm, 0, pcm, pos, u.pcm.size)
+                pos += u.pcm.size
+            }
+            PcmChunk(
+                pcm = pcm,
+                sampleRate = sampleRate,
+                index = index,
+                total = groups.size,
+                startMs = group.first().offsetMs.coerceAtLeast(0L),
+                utteranceCount = group.size
+            )
         }
     }
 
@@ -55,7 +115,6 @@ object WavChunker {
         if (mono16k.isEmpty()) return emptyList()
 
         val bytesPerChunk = (targetSampleRate * 2L * chunkMs / 1000L).toInt().coerceAtLeast(2)
-        // Align to sample boundary
         val aligned = bytesPerChunk - (bytesPerChunk % 2)
         if (aligned <= 0) return emptyList()
 
@@ -73,7 +132,8 @@ object WavChunker {
                     sampleRate = targetSampleRate,
                     index = index,
                     total = total,
-                    startMs = startMs
+                    startMs = startMs,
+                    utteranceCount = 0
                 )
             )
             index++
@@ -107,7 +167,6 @@ object WavChunker {
         return out
     }
 
-    /** Linear resample 16-bit mono PCM. */
     private fun resamplePcm16Mono(pcm: ByteArray, fromRate: Int, toRate: Int): ByteArray {
         if (fromRate == toRate || pcm.isEmpty()) return pcm
         val inSamples = pcm.size / 2
@@ -123,7 +182,9 @@ object WavChunker {
             val i1 = (i0 + 1).coerceAtMost(inSamples - 1)
             val frac = src - i0
             val v = inBuf[i0] * (1.0 - frac) + inBuf[i1] * frac
-            outBb.putShort(v.toInt().coerceIn(Short.MIN_VALUE.toInt(), Short.MAX_VALUE.toInt()).toShort())
+            outBb.putShort(
+                v.toInt().coerceIn(Short.MIN_VALUE.toInt(), Short.MAX_VALUE.toInt()).toShort()
+            )
         }
         return out
     }
