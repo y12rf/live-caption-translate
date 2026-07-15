@@ -100,16 +100,19 @@ class RecordingService : Service() {
                 return START_STICKY
             }
             ACTION_STOP -> {
+                // Drain pipeline by default so weak-net backlog can finish.
+                // Tear-down (projection / stopSelf) happens when state → Idle (observe loop).
+                val drain = intent.getBooleanExtra(EXTRA_DRAIN, true)
                 try {
-                    controller.stop()
+                    controller.stop(drain = drain)
                 } catch (e: Exception) {
                     Log.e(TAG, "stop failed", e)
+                    releaseKeepAliveLocks()
+                    releaseProjection()
+                    stopOverlay()
+                    stopSelf()
                 }
-                releaseKeepAliveLocks()
-                releaseProjection()
-                stopOverlay()
-                stopSelf()
-                return START_NOT_STICKY
+                return START_STICKY
             }
             ACTION_TOGGLE_OVERLAY_LOCK -> {
                 try {
@@ -302,6 +305,9 @@ class RecordingService : Service() {
                         ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
                 AudioSourceType.Microphone ->
                     ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
+                // File import does not capture mic; still need a FGS type if ever used.
+                AudioSourceType.File ->
+                    ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
             }
             startForeground(NOTIF_ID, notif, type)
         } else {
@@ -465,6 +471,7 @@ class RecordingService : Service() {
             "com.example.livetranslate.action.TOGGLE_OVERLAY_LOCK"
         const val ACTION_REFRESH_NOTIF = "com.example.livetranslate.action.REFRESH_NOTIF"
         const val EXTRA_AUDIO_SOURCE = "audio_source"
+        const val EXTRA_DRAIN = "drain"
 
         /** Best-effort refresh of FGS notification (e.g. after overlay lock toggle). */
         fun refreshNotification(context: Context) {
@@ -508,8 +515,14 @@ class RecordingService : Service() {
             }
         }
 
-        fun stop(context: Context) {
-            val i = Intent(context, RecordingService::class.java).setAction(ACTION_STOP)
+        /**
+         * @param drain true = wait for ASR/LLM queues (up to timeout) before saving;
+         *              false = cancel in-flight work immediately.
+         */
+        fun stop(context: Context, drain: Boolean = true) {
+            val i = Intent(context, RecordingService::class.java)
+                .setAction(ACTION_STOP)
+                .putExtra(EXTRA_DRAIN, drain)
             try {
                 context.startService(i)
             } catch (e: Exception) {

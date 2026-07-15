@@ -28,4 +28,20 @@ class SessionOrchestratorTest {
         assertEquals(u, retried)
         assertNotEquals(u, u.copy(offsetMs = 0L))
     }
+
+    @Test
+    fun transcriptSegment_localIdSurvivesCopyForLlmRetry() {
+        val seg = com.example.livetranslate.domain.model.TranscriptSegment(
+            source = "Hi",
+            translation = "",
+            cutReason = CutReason.Silence,
+            incomplete = true,
+            offsetMs = 1_000L,
+            localId = 42L
+        )
+        val updated = seg.copy(translation = "你好", incomplete = false)
+        assertEquals(42L, updated.localId)
+        assertEquals(1_000L, updated.offsetMs)
+        assertEquals("你好", updated.translation)
+    }
 }

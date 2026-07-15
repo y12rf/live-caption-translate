@@ -1,5 +1,6 @@
 package com.example.livetranslate.ui.live
 
+import android.net.Uri
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import com.example.livetranslate.data.history.ExportTextMode
@@ -18,9 +19,13 @@ class LiveTranslateViewModel(
     fun setAudioSource(type: AudioSourceType) = controller.setAudioSource(type)
     fun setOverlayEnabled(enabled: Boolean) = controller.setOverlayEnabled(enabled)
     fun start() = controller.start()
+    fun startFromFile(uri: Uri) = controller.startFromFile(uri)
     fun pause() = controller.pause()
-    fun stop() = controller.stop()
+    fun stop(drain: Boolean = true) = controller.stop(drain)
     fun retry() = controller.retry()
+    fun retryAllFailed() = controller.retryAllFailed()
+    fun dismissFailures() = controller.dismissFailures()
+    fun retrySave() = controller.retrySave()
     fun exportMarkdown(): String? = controller.exportMarkdown()
     fun exportSrt(mode: ExportTextMode = ExportTextMode.Both): String? =
         controller.exportSrt(mode)

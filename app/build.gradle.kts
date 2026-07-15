@@ -87,6 +87,9 @@ dependencies {
     implementation("androidx.room:room-ktx:2.6.1")
     ksp("androidx.room:room-compiler:2.6.1")
 
+    // Community rebuild of retired arthenica ffmpeg-kit (audio package, FFmpeg 8.x)
+    implementation("com.antonkarpenko:ffmpeg-kit-audio:2.2.1")
+
     debugImplementation("androidx.compose.ui:ui-tooling")
     testImplementation("junit:junit:4.13.2")
     testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.8.1")

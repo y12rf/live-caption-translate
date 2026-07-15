@@ -44,4 +44,21 @@
     <string name="history_search_empty">无匹配会话</string>
     <string name="detail_search_hint">在本场搜索原文 / 译文</string>
     <string name="detail_search_empty">无匹配段落</string>
+    <string name="net_offline">离线 — 继续录音，恢复网络后自动补传</string>
+    <string name="net_backlog">队列 ASR %1$d · 译 %2$d · 磁盘 %3$d</string>
+    <string name="net_failed">失败 %1$d 句 — %2$s</string>
+    <string name="retry_one">重试 1 句</string>
+    <string name="retry_all">全部重试</string>
+    <string name="dismiss_fail">忽略失败</string>
+    <string name="retry_save">重试保存</string>
+    <string name="stop_title">结束会话</string>
+    <string name="stop_message">队列中还有未处理句子时，可等待补全（弱网推荐）或立即结束。</string>
+    <string name="stop_drain">等待完成并保存</string>
+    <string name="stop_now">立即结束</string>
+    <string name="session_draining">正在排空队列并保存…</string>
+    <string name="dropped_utt">已丢弃 %1$d 句</string>
+    <string name="source_file">文件</string>
+    <string name="start_file">选择文件</string>
+    <string name="file_pick_cancelled">未选择文件</string>
+    <string name="file_import_started">开始导入并翻译…</string>
 </resources>

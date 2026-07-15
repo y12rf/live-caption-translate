@@ -25,6 +25,8 @@ import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Share
+import androidx.compose.foundation.background
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -38,6 +40,7 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -75,6 +78,7 @@ fun LiveTranslateScreen(
     val zhScroll = rememberScrollState()
     var pendingStartSource by remember { mutableStateOf(AudioSourceType.Microphone) }
     var exportMenuOpen by remember { mutableStateOf(false) }
+    var stopDialogOpen by remember { mutableStateOf(false) }
 
     fun toastExportEmpty() {
         android.widget.Toast.makeText(
@@ -110,6 +114,36 @@ fun LiveTranslateScreen(
         projectionLauncher.launch(mpm.createScreenCaptureIntent())
     }
 
+    val filePickerLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocument()
+    ) { uri: Uri? ->
+        if (uri == null) {
+            android.widget.Toast.makeText(
+                context,
+                context.getString(R.string.file_pick_cancelled),
+                android.widget.Toast.LENGTH_SHORT
+            ).show()
+            return@rememberLauncherForActivityResult
+        }
+        try {
+            // Persist read permission across process restarts when possible
+            val flags = Intent.FLAG_GRANT_READ_URI_PERMISSION
+            context.contentResolver.takePersistableUriPermission(uri, flags)
+        } catch (_: SecurityException) {
+            // Some providers do not support persistable grants; open stream still works now.
+        }
+        viewModel.setAudioSource(AudioSourceType.File)
+        viewModel.startFromFile(uri)
+        if (viewModel.state.value.overlayEnabled) {
+            SubtitleOverlayService.start(context)
+        }
+        android.widget.Toast.makeText(
+            context,
+            context.getString(R.string.file_import_started),
+            android.widget.Toast.LENGTH_SHORT
+        ).show()
+    }
+
     val permissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
     ) { results ->
@@ -122,11 +156,18 @@ fun LiveTranslateScreen(
             AudioSourceType.Internal -> launchInternalProjection()
             AudioSourceType.Microphone ->
                 beginCapture(context, viewModel, AudioSourceType.Microphone, null, null)
+            AudioSourceType.File ->
+                filePickerLauncher.launch(arrayOf("audio/*", "video/*"))
         }
     }
 
     fun requestStart(source: AudioSourceType) {
         pendingStartSource = source
+        if (source == AudioSourceType.File) {
+            // SAF picker — no RECORD_AUDIO required
+            filePickerLauncher.launch(arrayOf("audio/*", "video/*"))
+            return
+        }
         val need = mutableListOf(Manifest.permission.RECORD_AUDIO)
         if (Build.VERSION.SDK_INT >= 33) {
             need += Manifest.permission.POST_NOTIFICATIONS
@@ -257,9 +298,89 @@ fun LiveTranslateScreen(
             Text(
                 text = "Phase: ${state.phase.name} · ${HistoryExport.formatOffset(state.recordedElapsedMs)}" +
                     (state.lastCutReason?.let { " · cut=${it.name}" } ?: "") +
-                    (state.sessionTitle?.let { " · $it" } ?: ""),
+                    (state.sessionTitle?.let { " · $it" } ?: "") +
+                    if (state.draining) " · draining" else "",
                 style = MaterialTheme.typography.labelMedium
             )
+            state.importStatus?.let { status ->
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    text = status,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.primary
+                )
+            }
+
+            // Network / backlog banner
+            val backlog = state.asrQueueDepth + state.llmQueueDepth + state.diskQueueDepth
+            if (!state.networkOnline || backlog > 0 || state.failedCount > 0 || state.droppedUtterances > 0) {
+                Spacer(Modifier.height(6.dp))
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(
+                            if (!state.networkOnline) {
+                                MaterialTheme.colorScheme.errorContainer
+                            } else {
+                                MaterialTheme.colorScheme.secondaryContainer
+                            }
+                        )
+                        .padding(8.dp)
+                ) {
+                    if (!state.networkOnline) {
+                        Text(
+                            stringResource(R.string.net_offline),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onErrorContainer
+                        )
+                    }
+                    if (backlog > 0 || state.draining) {
+                        Text(
+                            stringResource(
+                                R.string.net_backlog,
+                                state.asrQueueDepth,
+                                state.llmQueueDepth,
+                                state.diskQueueDepth
+                            ) + if (state.draining) {
+                                " · " + stringResource(R.string.session_draining)
+                            } else {
+                                ""
+                            },
+                            style = MaterialTheme.typography.bodySmall
+                        )
+                    }
+                    if (state.droppedUtterances > 0) {
+                        Text(
+                            stringResource(R.string.dropped_utt, state.droppedUtterances),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.error
+                        )
+                    }
+                    if (state.failedCount > 0) {
+                        Text(
+                            stringResource(
+                                R.string.net_failed,
+                                state.failedCount,
+                                state.failedPreview.orEmpty()
+                            ),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.error
+                        )
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            TextButton(onClick = viewModel::retry) {
+                                Text(stringResource(R.string.retry_one))
+                            }
+                            TextButton(onClick = viewModel::retryAllFailed) {
+                                Text(stringResource(R.string.retry_all))
+                            }
+                            TextButton(onClick = viewModel::dismissFailures) {
+                                Text(stringResource(R.string.dismiss_fail))
+                            }
+                        }
+                    }
+                }
+            }
+
             Spacer(Modifier.height(8.dp))
 
             Row(
@@ -287,6 +408,16 @@ fun LiveTranslateScreen(
                     label = { Text("Internal") },
                     enabled = state.phase == SessionPhase.Idle &&
                         Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q
+                )
+                FilterChip(
+                    selected = state.audioSource == AudioSourceType.File,
+                    onClick = {
+                        if (state.phase == SessionPhase.Idle) {
+                            viewModel.setAudioSource(AudioSourceType.File)
+                        }
+                    },
+                    label = { Text(stringResource(R.string.source_file)) },
+                    enabled = state.phase == SessionPhase.Idle
                 )
             }
 
@@ -347,11 +478,67 @@ fun LiveTranslateScreen(
             state.error?.let { err ->
                 Spacer(Modifier.height(8.dp))
                 Text(err, color = MaterialTheme.colorScheme.error)
-                if (state.canRetry) {
-                    OutlinedButton(onClick = viewModel::retry) {
-                        Text("Retry last utterance")
-                    }
+            }
+            if (state.canRetrySave) {
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    state.saveError ?: "保存失败",
+                    color = MaterialTheme.colorScheme.error
+                )
+                OutlinedButton(onClick = viewModel::retrySave) {
+                    Text(stringResource(R.string.retry_save))
                 }
+            }
+
+            if (stopDialogOpen) {
+                val pending =
+                    state.asrQueueDepth + state.llmQueueDepth + state.diskQueueDepth + state.failedCount
+                AlertDialog(
+                    onDismissRequest = { stopDialogOpen = false },
+                    title = { Text(stringResource(R.string.stop_title)) },
+                    text = {
+                        Text(
+                            stringResource(R.string.stop_message) +
+                                if (pending > 0) "\n\n当前积压约 $pending 项。" else ""
+                        )
+                    },
+                    confirmButton = {
+                        TextButton(onClick = {
+                            stopDialogOpen = false
+                            if (state.audioSource == AudioSourceType.File) {
+                                viewModel.stop(drain = true)
+                            } else {
+                                RecordingService.stop(context, drain = true)
+                            }
+                            SubtitleOverlayService.stop(context)
+                            android.widget.Toast.makeText(
+                                context,
+                                context.getString(R.string.session_draining),
+                                android.widget.Toast.LENGTH_SHORT
+                            ).show()
+                        }) {
+                            Text(stringResource(R.string.stop_drain))
+                        }
+                    },
+                    dismissButton = {
+                        TextButton(onClick = {
+                            stopDialogOpen = false
+                            if (state.audioSource == AudioSourceType.File) {
+                                viewModel.stop(drain = false)
+                            } else {
+                                RecordingService.stop(context, drain = false)
+                            }
+                            SubtitleOverlayService.stop(context)
+                            android.widget.Toast.makeText(
+                                context,
+                                context.getString(R.string.session_saved_with_audio),
+                                android.widget.Toast.LENGTH_SHORT
+                            ).show()
+                        }) {
+                            Text(stringResource(R.string.stop_now))
+                        }
+                    }
+                )
             }
 
             Spacer(Modifier.height(12.dp))
@@ -378,32 +565,38 @@ fun LiveTranslateScreen(
                             requestStart(state.audioSource)
                         }
                     },
-                    enabled = canStart,
+                    enabled = canStart && !state.draining,
                     modifier = Modifier.weight(1f)
                 ) {
-                    Text(if (state.phase == SessionPhase.Paused) "Resume" else "Start")
+                    Text(
+                        when {
+                            state.phase == SessionPhase.Paused -> "Resume"
+                            state.audioSource == AudioSourceType.File ->
+                                stringResource(R.string.start_file)
+                            else -> "Start"
+                        }
+                    )
                 }
                 OutlinedButton(
                     onClick = {
                         viewModel.pause()
                     },
-                    enabled = state.phase == SessionPhase.Recording ||
-                        state.phase == SessionPhase.Processing,
+                    enabled = state.audioSource != AudioSourceType.File &&
+                        (state.phase == SessionPhase.Recording ||
+                            state.phase == SessionPhase.Processing) &&
+                        !state.draining,
                     modifier = Modifier.weight(1f)
                 ) { Text("Pause") }
                 OutlinedButton(
                     onClick = {
-                        // Single entry: service calls controller.stop() once (idempotent).
-                        // Do NOT also call viewModel.stop() — that caused duplicate history rows.
-                        RecordingService.stop(context)
-                        SubtitleOverlayService.stop(context)
-                        android.widget.Toast.makeText(
-                            context,
-                            context.getString(R.string.session_saved_with_audio),
-                            android.widget.Toast.LENGTH_SHORT
-                        ).show()
+                        if (state.audioSource == AudioSourceType.File) {
+                            // File sessions do not use RecordingService FGS
+                            stopDialogOpen = true
+                        } else {
+                            stopDialogOpen = true
+                        }
                     },
-                    enabled = state.phase != SessionPhase.Idle,
+                    enabled = state.phase != SessionPhase.Idle && !state.draining,
                     modifier = Modifier.weight(1f)
                 ) { Text("Stop") }
             }

@@ -3,6 +3,7 @@ package com.example.livetranslate.data.asr
 import com.example.livetranslate.data.audio.WavEncoder
 import com.example.livetranslate.data.network.ApiUrlResolver
 import com.example.livetranslate.data.network.JsonLite
+import com.example.livetranslate.data.network.NetworkErrors
 import com.example.livetranslate.data.network.SseReader
 import com.example.livetranslate.domain.AsrTextMerger
 import com.example.livetranslate.domain.model.AsrStreamEvent
@@ -54,7 +55,7 @@ class AsrClient(
                 trySend(
                     AsrStreamEvent.Error(
                         IOException("ASR HTTP $code: $msg"),
-                        retryable = code == 408 || code == 429 || code in 500..599
+                        retryable = NetworkErrors.isRetryableHttp(code)
                     )
                 )
                 close()
@@ -80,7 +81,12 @@ class AsrClient(
                 close()
                 return@callbackFlow
             }
-            trySend(AsrStreamEvent.Error(e, retryable = true))
+            trySend(
+                AsrStreamEvent.Error(
+                    e,
+                    retryable = NetworkErrors.isRetryableThrowable(e)
+                )
+            )
             close(e)
         }
 

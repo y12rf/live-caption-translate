@@ -2,11 +2,13 @@ package com.example.livetranslate.domain
 
 import android.content.Context
 import android.media.projection.MediaProjection
+import android.net.Uri
 import com.example.livetranslate.data.asr.AsrClient
 import com.example.livetranslate.data.audio.AudioCapture
 import com.example.livetranslate.data.history.ExportTextMode
 import com.example.livetranslate.data.history.HistoryRepository
 import com.example.livetranslate.data.llm.LlmClient
+import com.example.livetranslate.data.network.NetworkMonitor
 import com.example.livetranslate.data.settings.SettingsRepository
 import com.example.livetranslate.data.settings.UserSettings
 import com.example.livetranslate.domain.model.AudioSourceType
@@ -24,7 +26,8 @@ class SessionController(
     asr: AsrClient,
     llm: LlmClient,
     settingsRepo: SettingsRepository,
-    history: HistoryRepository
+    history: HistoryRepository,
+    network: NetworkMonitor
 ) {
     @Volatile
     private var latestSettings = UserSettings()
@@ -41,7 +44,9 @@ class SessionController(
         asr = asr,
         llm = llm,
         settingsRepo = settingsRepo,
-        history = history
+        history = history,
+        network = network,
+        appContext = appContext
     )
 
     val state: StateFlow<LiveSessionUiState> = orchestrator.state
@@ -57,9 +62,13 @@ class SessionController(
     fun setAudioSource(type: AudioSourceType) = orchestrator.setAudioSource(type)
     fun setOverlayEnabled(enabled: Boolean) = orchestrator.setOverlayEnabled(enabled)
     fun start() = orchestrator.start()
+    fun startFromFile(uri: Uri) = orchestrator.startFromFile(uri)
     fun pause() = orchestrator.pause()
-    fun stop() = orchestrator.stop()
+    fun stop(drain: Boolean = true) = orchestrator.stop(drain)
     fun retry() = orchestrator.retryLastFailed()
+    fun retryAllFailed() = orchestrator.retryAllFailed()
+    fun dismissFailures() = orchestrator.dismissFailures()
+    fun retrySave() = orchestrator.retrySave()
     fun exportMarkdown(): String? = orchestrator.exportMarkdown()
     fun exportSrt(mode: ExportTextMode = ExportTextMode.Both): String? =
         orchestrator.exportSrt(mode)

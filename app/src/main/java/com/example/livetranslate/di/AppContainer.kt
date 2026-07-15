@@ -4,6 +4,7 @@ import android.content.Context
 import com.example.livetranslate.data.asr.AsrClient
 import com.example.livetranslate.data.history.HistoryRepository
 import com.example.livetranslate.data.llm.LlmClient
+import com.example.livetranslate.data.network.NetworkMonitor
 import com.example.livetranslate.data.settings.SettingsRepository
 import com.example.livetranslate.domain.SessionController
 import kotlinx.coroutines.CoroutineScope
@@ -19,11 +20,20 @@ class AppContainer(context: Context) {
 
     val settingsRepository = SettingsRepository(appContext)
     val historyRepository = HistoryRepository(appContext)
+    val networkMonitor = NetworkMonitor(appContext).also { it.start() }
 
+    /**
+     * Streaming client:
+     * - readTimeout = SSE idle gap (no bytes) → fails instead of hanging forever
+     * - callTimeout = hard upper bound for one ASR/LLM attempt
+     * - writeTimeout = weak-net upload of WAV / base64
+     */
     val okHttp: OkHttpClient = OkHttpClient.Builder()
-        .connectTimeout(30, TimeUnit.SECONDS)
-        .readTimeout(0, TimeUnit.MILLISECONDS)
-        .writeTimeout(60, TimeUnit.SECONDS)
+        .connectTimeout(20, TimeUnit.SECONDS)
+        .readTimeout(45, TimeUnit.SECONDS)
+        .writeTimeout(90, TimeUnit.SECONDS)
+        .callTimeout(120, TimeUnit.SECONDS)
+        .retryOnConnectionFailure(true)
         .build()
 
     val asrClient = AsrClient(okHttp)
@@ -35,7 +45,8 @@ class AppContainer(context: Context) {
         asr = asrClient,
         llm = llmClient,
         settingsRepo = settingsRepository,
-        history = historyRepository
+        history = historyRepository,
+        network = networkMonitor
     )
 
     init {

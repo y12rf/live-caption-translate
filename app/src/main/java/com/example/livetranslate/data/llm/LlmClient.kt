@@ -3,6 +3,7 @@ package com.example.livetranslate.data.llm
 import com.example.livetranslate.data.asr.AsrClient.Companion.applyAuth
 import com.example.livetranslate.data.network.ApiUrlResolver
 import com.example.livetranslate.data.network.JsonLite
+import com.example.livetranslate.data.network.NetworkErrors
 import com.example.livetranslate.data.network.SseReader
 import com.example.livetranslate.domain.model.ContextTurn
 import com.example.livetranslate.domain.model.LlmStreamEvent
@@ -118,7 +119,7 @@ class LlmClient(
                 trySend(
                     LlmStreamEvent.Error(
                         IOException("LLM HTTP $code:$hint | body=$msg"),
-                        retryable = code == 408 || code == 429 || code in 500..599
+                        retryable = NetworkErrors.isRetryableHttp(code)
                     )
                 )
                 close()
@@ -144,7 +145,12 @@ class LlmClient(
                 close()
                 return@callbackFlow
             }
-            trySend(LlmStreamEvent.Error(e, retryable = true))
+            trySend(
+                LlmStreamEvent.Error(
+                    e,
+                    retryable = NetworkErrors.isRetryableThrowable(e)
+                )
+            )
             close(e)
         }
 

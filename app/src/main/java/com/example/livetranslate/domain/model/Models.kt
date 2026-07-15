@@ -7,7 +7,9 @@ enum class AudioSourceType {
     /** Device microphone */
     Microphone,
     /** Other apps' playback (internal audio, API 29+) */
-    Internal
+    Internal,
+    /** User-picked file → FFmpeg → offline VAD → same ASR/LLM pipeline */
+    File
 }
 
 data class UtteranceAudio(
@@ -65,5 +67,10 @@ data class TranscriptSegment(
      * ms into continuous recording (pauses excluded), for SRT / audio align.
      * Prefer utterance cut time over translation-complete wall clock.
      */
-    val offsetMs: Long = 0L
+    val offsetMs: Long = 0L,
+    /**
+     * In-session id so ASR-first commit can be updated when LLM finishes
+     * (or marked failed without reordering).
+     */
+    val localId: Long = 0L
 )

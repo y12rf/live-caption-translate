@@ -32,6 +32,7 @@ import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import java.io.File
 import kotlin.math.max
 
 /**
@@ -79,6 +80,13 @@ class AudioCapture(
     /** Continuous session WAV (full lecture), independent of VAD utterances. */
     private val sessionRecorder = SessionAudioRecorder(appContext)
 
+    /**
+     * Path to a pre-converted session WAV (file-import mode).
+     * When set, [finishSessionRecording] returns this instead of live recorder output.
+     */
+    @Volatile
+    private var importedSessionWavPath: String? = null
+
     /** Keeps MediaProjection session active on Android 14+ / Pixel (audio-only path). */
     private var projectionDisplay: VirtualDisplay? = null
     private var projectionReader: ImageReader? = null
@@ -89,19 +97,51 @@ class AudioCapture(
 
     /** Start (or restart) full-session WAV capture. Call when a new Idle→Recording session begins. */
     fun beginSessionRecording(startedAt: Long) {
+        importedSessionWavPath = null
         sessionRecorder.begin(startedAt)
     }
 
+    /**
+     * File-import: copy converted 16k mono WAV into recordings/ as the session archive.
+     * @return absolute path of the installed file
+     */
+    fun installImportedSessionWav(source: File, startedAt: Long): String {
+        sessionRecorder.discard()
+        val dir = File(appContext.filesDir, SessionAudioRecorder.RECORDINGS_DIR).apply { mkdirs() }
+        val stamp = java.text.SimpleDateFormat("yyyyMMdd_HHmmss", java.util.Locale.US)
+            .format(java.util.Date(startedAt))
+        val dest = File(dir, "session_${stamp}_import.wav")
+        source.copyTo(dest, overwrite = true)
+        if (!dest.isFile || dest.length() < 44L) {
+            throw IllegalStateException("导入会话 WAV 写入失败")
+        }
+        importedSessionWavPath = dest.absolutePath
+        Log.i(TAG, "installed imported session wav → ${dest.absolutePath}")
+        return dest.absolutePath
+    }
+
     /** Finalize WAV; returns absolute path or null if empty / failed. */
-    fun finishSessionRecording(): String? = sessionRecorder.finish()
+    fun finishSessionRecording(): String? {
+        val imported = importedSessionWavPath
+        if (imported != null) {
+            importedSessionWavPath = null
+            val f = File(imported)
+            return if (f.isFile && f.length() > 44L) imported else null
+        }
+        return sessionRecorder.finish()
+    }
 
     fun discardSessionRecording() {
+        importedSessionWavPath = null
         sessionRecorder.discard()
     }
 
     fun start() {
         if (running) return
         clearError()
+        if (sourceType == AudioSourceType.File) {
+            throw IllegalStateException("文件模式请使用 startFromFile，不要直接 start 采集")
+        }
         if (sourceType == AudioSourceType.Internal) {
             if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
                 throw IllegalStateException("内部录音需要 Android 10+")

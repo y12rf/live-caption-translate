@@ -148,7 +148,7 @@ class ApiLatencyProbe(
     private fun execute(request: Request, url: String): Result {
         var code: Int? = null
         var detail = ""
-        var ok = false
+        var ok: Boolean
         val ms = measureTimeMillis {
             try {
                 http.newCall(request).execute().use { resp ->
