@@ -17,9 +17,16 @@ object AppLocale {
             else -> EN
         }
 
-    /** Apply process-wide UI locales (Compose + resources). */
+    /** Apply process-wide UI locales (Compose + resources). Requires AppCompatActivity. */
     fun apply(languageTag: String) {
         val tag = normalize(languageTag)
-        AppCompatDelegate.setApplicationLocales(LocaleListCompat.forLanguageTags(tag))
+        val locales = LocaleListCompat.forLanguageTags(tag)
+        // Always set — even if equal — so first launch and Save are reliable.
+        AppCompatDelegate.setApplicationLocales(locales)
+    }
+
+    fun currentApplicationTag(): String {
+        val tags = AppCompatDelegate.getApplicationLocales().toLanguageTags()
+        return normalize(tags.substringBefore(',').ifBlank { EN })
     }
 }

@@ -1129,8 +1129,10 @@ class SessionOrchestrator(
         )
         _state.update {
             it.copy(
+                // Commit final EN into cumulative only. Keep partialEn empty so UI
+                // buildDisplay(cumulative, partial) does not show the same line twice.
                 cumulativeEn = appendBlock(it.cumulativeEn, en),
-                partialEn = en,
+                partialEn = "",
                 segments = it.segments + seg,
                 error = null
             )

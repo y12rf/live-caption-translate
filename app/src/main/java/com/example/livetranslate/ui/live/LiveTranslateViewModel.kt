@@ -43,13 +43,19 @@ class LiveTranslateViewModel(
 
     fun setAudioSource(type: AudioSourceType) = controller.setAudioSource(type)
     fun setOverlayEnabled(enabled: Boolean) = controller.setOverlayEnabled(enabled)
-    fun start() = controller.start()
+
+    fun start() {
+        // Dismiss recovery UI so a new session is not confused with an orphan prompt.
+        _orphanPrompt.value = null
+        controller.start()
+    }
 
     /**
      * File source: offline Re channel (FFmpeg → chunk ASR → punctuation → translate →
      * LLM title when ≥10 turns → save). Does not use live VAD queues.
      */
     fun startFromFile(uri: Uri) {
+        _orphanPrompt.value = null
         controller.setAudioSource(AudioSourceType.File)
         reprocess.startFromUri(uri)
     }
@@ -84,14 +90,12 @@ class LiveTranslateViewModel(
      */
     fun checkOrphans() {
         viewModelScope.launch {
-            // Do not interrupt an active live/file session with recovery UI.
+            // Never prompt while live/file session is running or WAV is still open.
             if (controller.isSessionBusy() ||
-                controller.state.value.phase != SessionPhase.Idle
+                controller.state.value.phase != SessionPhase.Idle ||
+                controller.isSessionRecordingActive() ||
+                reprocess.isBusy
             ) {
-                _orphanPrompt.value = null
-                return@launch
-            }
-            if (reprocess.isBusy) {
                 _orphanPrompt.value = null
                 return@launch
             }
@@ -103,11 +107,15 @@ class LiveTranslateViewModel(
                 context = getApplication(),
                 excludePaths = exclude
             )
-            val next = orphans.firstOrNull { it.path !in laterSkip && it.path !in exclude }
-                ?: run {
-                    _orphanPrompt.value = null
-                    return@launch
-                }
+            val next = orphans.firstOrNull { o ->
+                o.path !in laterSkip &&
+                    o.path !in exclude &&
+                    // Ignore brand-new empty-ish headers that may race with Start
+                    o.lengthBytes > 44L
+            } ?: run {
+                _orphanPrompt.value = null
+                return@launch
+            }
             _orphanPrompt.value = OrphanPrompt(
                 path = next.path,
                 label = next.file.name

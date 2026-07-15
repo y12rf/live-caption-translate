@@ -145,6 +145,9 @@ class AudioCapture(
         return sessionRecorder.currentFile?.absolutePath
     }
 
+    /** True while PCM is being written into the session WAV (not yet finished). */
+    fun isSessionRecordingActive(): Boolean = sessionRecorder.isActive
+
     fun start() {
         if (running) return
         clearError()

@@ -61,6 +61,9 @@ class SessionController(
      */
     fun activeSessionAudioPath(): String? = audio.activeSessionAudioPath()
 
+    /** True while the live session WAV is open for write. */
+    fun isSessionRecordingActive(): Boolean = audio.isSessionRecordingActive()
+
     fun updateCachedSettings(s: UserSettings) {
         latestSettings = s
     }

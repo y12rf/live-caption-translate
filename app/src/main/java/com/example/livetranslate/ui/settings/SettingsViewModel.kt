@@ -11,10 +11,12 @@ import com.example.livetranslate.data.settings.SettingsRepository
 import com.example.livetranslate.data.settings.UserSettings
 import com.example.livetranslate.di.AppContainer
 import com.example.livetranslate.domain.SessionController
+import com.example.livetranslate.util.AppLocale
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -63,8 +65,23 @@ class SettingsViewModel(
     fun save() {
         viewModelScope.launch {
             val draft = _ui.value.draft
+            val previousLang = AppLocale.normalize(
+                runCatching { repo.settings.first().uiLanguage }.getOrDefault(AppLocale.EN)
+            )
+            val nextLang = AppLocale.normalize(draft.uiLanguage)
             repo.update { draft }
-            _ui.update { it.copy(savedMessage = "Saved") }
+            // Apply UI locale after DataStore write so string resources refresh.
+            AppLocale.apply(nextLang)
+            val langChanged = previousLang != nextLang
+            _ui.update {
+                it.copy(
+                    savedMessage = if (langChanged) {
+                        "Saved · language applied"
+                    } else {
+                        "Saved"
+                    }
+                )
+            }
         }
     }
 

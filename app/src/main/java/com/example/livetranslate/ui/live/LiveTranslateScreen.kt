@@ -727,11 +727,19 @@ private fun beginCapture(
     }
 }
 
-private fun buildDisplay(cumulative: String, partial: String): String {
+/**
+ * Live bilingual panel text. [partial] is in-flight only; if it already equals the
+ * last cumulative block (commit race), do not append again.
+ */
+internal fun buildDisplay(cumulative: String, partial: String): String {
+    val p = partial.trim()
+    val c = cumulative.trimEnd()
     return when {
-        cumulative.isEmpty() && partial.isEmpty() -> "..."
-        cumulative.isEmpty() -> partial
-        partial.isEmpty() -> cumulative
-        else -> cumulative + "\n" + partial
+        c.isEmpty() && p.isEmpty() -> "..."
+        c.isEmpty() -> p
+        p.isEmpty() -> c
+        // Already committed as last line / whole buffer
+        c == p || c.endsWith("\n$p") -> c
+        else -> "$c\n$p"
     }
 }
