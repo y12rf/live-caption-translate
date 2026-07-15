@@ -44,9 +44,28 @@ class LiveTranslateViewModel(
     fun setAudioSource(type: AudioSourceType) = controller.setAudioSource(type)
     fun setOverlayEnabled(enabled: Boolean) = controller.setOverlayEnabled(enabled)
     fun start() = controller.start()
-    fun startFromFile(uri: Uri) = controller.startFromFile(uri)
+
+    /**
+     * File source: offline Re channel (FFmpeg → chunk ASR → punctuation → translate →
+     * LLM title when ≥10 turns → save). Does not use live VAD queues.
+     */
+    fun startFromFile(uri: Uri) {
+        controller.setAudioSource(AudioSourceType.File)
+        reprocess.startFromUri(uri)
+    }
+
     fun pause() = controller.pause()
-    fun stop(drain: Boolean = true) = controller.stop(drain)
+
+    fun stop(drain: Boolean = true) {
+        // File import / offline reprocess: cancel pipeline instead of live stop.
+        if (reprocess.isBusy) {
+            reprocess.cancel()
+            return
+        }
+        controller.stop(drain)
+    }
+
+    fun cancelReprocess() = reprocess.cancel()
     fun retry() = controller.retry()
     fun retryAllFailed() = controller.retryAllFailed()
     fun dismissFailures() = controller.dismissFailures()

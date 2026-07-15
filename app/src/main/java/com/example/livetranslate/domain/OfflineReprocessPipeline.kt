@@ -1,8 +1,11 @@
 package com.example.livetranslate.domain
 
+import android.content.Context
+import android.net.Uri
 import com.example.livetranslate.data.asr.AsrClient
 import com.example.livetranslate.data.asr.AsrConfig
 import com.example.livetranslate.data.asr.AsrOutputSanitizer
+import com.example.livetranslate.data.audio.FfmpegAudioConverter
 import com.example.livetranslate.data.audio.SessionAudioRecorder
 import com.example.livetranslate.data.audio.WavChunker
 import com.example.livetranslate.data.history.HistoryRepository
@@ -28,13 +31,29 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeoutOrNull
 import java.io.File
+import java.io.FileOutputStream
 import java.util.concurrent.atomic.AtomicBoolean
 
 enum class ReprocessPhase {
     Idle,
     Running,
     Cancelling
+}
+
+/**
+ * How to build the history session title after offline ASR/translate.
+ */
+enum class OfflineTitlePolicy {
+    /** History re-run / orphan: always `Re` + base (no LLM). */
+    RePrefix,
+
+    /**
+     * File import: LLM summarize when ≥ [LlmClient.TITLE_TURN_THRESHOLD] turns,
+     * else translation-preview fallback (same spirit as live Stop).
+     */
+    LlmThenPreview
 }
 
 data class ReprocessUiState(
@@ -47,15 +66,18 @@ data class ReprocessUiState(
     val error: String? = null,
     /** Last successfully saved session id. */
     val lastSavedSessionId: Long? = null,
-    /** Audio path currently being processed (for UI lock). */
-    val activeAudioPath: String? = null
+    /** Audio path currently being processed (for UI lock / orphan exclude). */
+    val activeAudioPath: String? = null,
+    /** Optional generated title for UI. */
+    val sessionTitle: String? = null
 )
 
 /**
- * Offline full-session reprocess: chunked ASR → punctuation split → sequential LLM → new Room session.
- * Shares WAV path with the source session; does not write on failure or cancel.
+ * Offline full-session path: chunked ASR → punctuation split → sequential LLM → Room.
+ * Used by history re-run, orphan recovery, and home **file** import.
  */
 class OfflineReprocessPipeline(
+    private val appContext: Context,
     private val scope: CoroutineScope,
     private val asr: AsrClient,
     private val llm: LlmClient,
@@ -64,6 +86,7 @@ class OfflineReprocessPipeline(
     private val network: NetworkMonitor,
     private val isLiveSessionBusy: () -> Boolean = { false }
 ) {
+    private val ffmpeg = FfmpegAudioConverter()
     private val _state = MutableStateFlow(ReprocessUiState())
     val state: StateFlow<ReprocessUiState> = _state.asStateFlow()
 
@@ -75,39 +98,45 @@ class OfflineReprocessPipeline(
             _state.value.phase == ReprocessPhase.Cancelling
 
     /**
-     * @param audioPath absolute path to session WAV
-     * @param baseTitle original session preview / title for `Re` prefix
+     * History re-run or orphan recovery on an existing WAV.
+     * Title: [OfflineTitlePolicy.RePrefix].
      */
     fun start(audioPath: String, baseTitle: String?) {
+        startInternal(
+            audioPath = audioPath,
+            baseTitle = baseTitle,
+            titlePolicy = OfflineTitlePolicy.RePrefix
+        )
+    }
+
+    /**
+     * Home file source: copy URI → FFmpeg 16k mono WAV → same offline ASR/translate path.
+     * Title: [OfflineTitlePolicy.LlmThenPreview] (does not forget LLM session title).
+     */
+    fun startFromUri(uri: Uri) {
         if (isBusy) return
         if (isLiveSessionBusy()) {
             _state.update {
-                it.copy(error = "请先结束当前实时会话，再事后重跑")
+                it.copy(error = "请先结束当前实时会话，再导入文件")
             }
             return
         }
-        val file = SessionAudioRecorder.fileForPath(audioPath)
-        if (file == null) {
-            _state.update { it.copy(error = "录音文件无效或已损坏") }
-            return
-        }
-
         cancelRequested.set(false)
         job?.cancel()
         job = scope.launch {
             try {
-                runPipeline(file, audioPath, baseTitle)
+                runFromUri(uri)
             } catch (e: CancellationException) {
                 _state.value = ReprocessUiState(
                     phase = ReprocessPhase.Idle,
-                    error = "已取消重跑"
+                    error = "已取消文件导入"
                 )
                 throw e
             } catch (e: Exception) {
-                android.util.Log.e(TAG, "reprocess failed", e)
+                android.util.Log.e(TAG, "startFromUri failed", e)
                 _state.value = ReprocessUiState(
                     phase = ReprocessPhase.Idle,
-                    error = e.message ?: "重跑失败"
+                    error = e.message ?: "文件导入失败"
                 )
             }
         }
@@ -130,11 +159,104 @@ class OfflineReprocessPipeline(
         _state.update { it.copy(lastSavedSessionId = null) }
     }
 
-    private suspend fun runPipeline(file: File, audioPath: String, baseTitle: String?) {
+    private fun startInternal(
+        audioPath: String,
+        baseTitle: String?,
+        titlePolicy: OfflineTitlePolicy
+    ) {
+        if (isBusy) return
+        if (isLiveSessionBusy()) {
+            _state.update {
+                it.copy(error = "请先结束当前实时会话，再事后重跑")
+            }
+            return
+        }
+        val file = SessionAudioRecorder.fileForPath(audioPath)
+        if (file == null) {
+            _state.update { it.copy(error = "录音文件无效或已损坏") }
+            return
+        }
+
+        cancelRequested.set(false)
+        job?.cancel()
+        job = scope.launch {
+            try {
+                runPipeline(file, audioPath, baseTitle, titlePolicy)
+            } catch (e: CancellationException) {
+                _state.value = ReprocessUiState(
+                    phase = ReprocessPhase.Idle,
+                    error = "已取消重跑"
+                )
+                throw e
+            } catch (e: Exception) {
+                android.util.Log.e(TAG, "reprocess failed", e)
+                _state.value = ReprocessUiState(
+                    phase = ReprocessPhase.Idle,
+                    error = e.message ?: "重跑失败"
+                )
+            }
+        }
+    }
+
+    private suspend fun runFromUri(uri: Uri) {
         val settings = settingsRepo.settings.first()
         validateKeys(settings)
         if (!network.isOnline()) {
-            throw Exception("当前离线，无法重跑")
+            throw Exception("当前离线，无法导入文件")
+        }
+
+        val startedAt = System.currentTimeMillis()
+        _state.value = ReprocessUiState(
+            phase = ReprocessPhase.Running,
+            message = "正在复制文件…"
+        )
+
+        val workDir = File(appContext.cacheDir, "import_audio").apply { mkdirs() }
+        val inputCopy = File(workDir, "src_${startedAt}${guessExtension(uri)}")
+        val outWav = File(workDir, "converted_${startedAt}.wav")
+        checkCancel()
+        copyUriToFile(uri, inputCopy)
+
+        checkCancel()
+        _state.update { it.copy(message = "FFmpeg 转码中…") }
+        val converted = ffmpeg.convertTo16kMonoWav(
+            inputPath = inputCopy.absolutePath,
+            outputWav = outWav
+        ) { p ->
+            _state.update {
+                it.copy(message = "FFmpeg 转码 ${(p * 100).toInt()}%")
+            }
+        }
+
+        checkCancel()
+        _state.update { it.copy(message = "安装会话录音…") }
+        val sessionPath = installSessionWav(converted.wavFile, startedAt)
+        runCatching { inputCopy.delete() }
+        if (outWav.absolutePath != sessionPath) {
+            runCatching { outWav.delete() }
+        }
+
+        val file = File(sessionPath)
+        runPipeline(
+            file = file,
+            audioPath = sessionPath,
+            baseTitle = null,
+            titlePolicy = OfflineTitlePolicy.LlmThenPreview,
+            startedAtOverride = startedAt
+        )
+    }
+
+    private suspend fun runPipeline(
+        file: File,
+        audioPath: String,
+        baseTitle: String?,
+        titlePolicy: OfflineTitlePolicy,
+        startedAtOverride: Long? = null
+    ) {
+        val settings = settingsRepo.settings.first()
+        validateKeys(settings)
+        if (!network.isOnline()) {
+            throw Exception("当前离线，无法处理")
         }
 
         _state.value = ReprocessUiState(
@@ -181,7 +303,7 @@ class OfflineReprocessPipeline(
         val window = ArrayDeque<ContextTurn>()
         val windowSize = settings.contextWindowSize.coerceAtLeast(0)
         val segments = ArrayList<TranscriptSegment>(sentences.size)
-        val startedAt = System.currentTimeMillis()
+        val startedAt = startedAtOverride ?: System.currentTimeMillis()
 
         for ((idx, sentence) in sentences.withIndex()) {
             checkCancel()
@@ -208,9 +330,11 @@ class OfflineReprocessPipeline(
         }
 
         checkCancel()
-        _state.update { it.copy(message = "保存会话…") }
+        val title = resolveTitle(segments, settings, baseTitle, titlePolicy)
+        _state.update {
+            it.copy(message = "保存会话…", sessionTitle = title)
+        }
         val endedAt = System.currentTimeMillis()
-        val title = ReprocessTitle.reTitle(baseTitle)
         val id = history.saveSession(
             startedAt = startedAt,
             endedAt = endedAt,
@@ -222,8 +346,105 @@ class OfflineReprocessPipeline(
         _state.value = ReprocessUiState(
             phase = ReprocessPhase.Idle,
             message = "已保存：$title",
-            lastSavedSessionId = id
+            lastSavedSessionId = id,
+            sessionTitle = title
         )
+    }
+
+    private suspend fun resolveTitle(
+        segments: List<TranscriptSegment>,
+        settings: UserSettings,
+        baseTitle: String?,
+        policy: OfflineTitlePolicy
+    ): String {
+        return when (policy) {
+            OfflineTitlePolicy.RePrefix -> ReprocessTitle.reTitle(baseTitle)
+            OfflineTitlePolicy.LlmThenPreview -> {
+                val llmTitle = maybeLlmTitle(segments, settings)
+                llmTitle?.takeIf { it.isNotBlank() }
+                    ?: previewFromSegments(segments)
+            }
+        }
+    }
+
+    /**
+     * Same threshold as live [SessionOrchestrator.maybeRequestSessionTitle].
+     * Failure is non-fatal — fall back to preview.
+     */
+    private suspend fun maybeLlmTitle(
+        segments: List<TranscriptSegment>,
+        settings: UserSettings
+    ): String? {
+        if (segments.size < LlmClient.TITLE_TURN_THRESHOLD) return null
+        if (settings.llmApiKey.isBlank()) return null
+        if (!network.isOnline()) return null
+        checkCancel()
+        _state.update { it.copy(message = "生成会话标题…") }
+        return try {
+            withTimeoutOrNull(TITLE_CALL_TIMEOUT_MS) {
+                llm.summarizeSessionTitle(
+                    segments = segments,
+                    config = LlmConfig(
+                        baseUrl = settings.normalizedLlmBaseUrl(),
+                        apiKey = settings.llmApiKey.trim(),
+                        model = settings.llmModel.trim(),
+                        targetLanguage = settings.outputLanguage.trim(),
+                        sourceLanguage = settings.inputLanguage.trim(),
+                        systemPrompt = settings.renderLlmSystemPrompt(),
+                        authStyle = settings.llmAuthStyleEnum(),
+                        fullUrl = settings.llmFullUrl,
+                        thinking = settings.llmThinkingMode()
+                    )
+                )
+            }?.trim()?.takeIf { it.isNotBlank() }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            android.util.Log.w(TAG, "session title failed", e)
+            null
+        }
+    }
+
+    private fun previewFromSegments(segments: List<TranscriptSegment>): String {
+        val zh = segments.joinToString(" ") { it.translation }.trim().take(80)
+        if (zh.isNotBlank()) return zh
+        val en = segments.joinToString(" ") { it.source }.trim().take(80)
+        return en.ifBlank { "文件导入" }
+    }
+
+    private fun installSessionWav(source: File, startedAt: Long): String {
+        val dir = File(appContext.filesDir, SessionAudioRecorder.RECORDINGS_DIR).apply { mkdirs() }
+        val stamp = java.text.SimpleDateFormat("yyyyMMdd_HHmmss", java.util.Locale.US)
+            .format(java.util.Date(startedAt))
+        val dest = File(dir, "session_${stamp}_import.wav")
+        source.copyTo(dest, overwrite = true)
+        if (!dest.isFile || dest.length() < 44L) {
+            throw IllegalStateException("导入会话 WAV 写入失败")
+        }
+        return dest.absolutePath
+    }
+
+    private fun copyUriToFile(uri: Uri, dest: File) {
+        appContext.contentResolver.openInputStream(uri)?.use { input ->
+            FileOutputStream(dest).use { output ->
+                input.copyTo(output)
+            }
+        } ?: throw IllegalStateException("无法读取所选文件")
+        if (!dest.isFile || dest.length() < 64L) {
+            throw IllegalStateException("文件过小或复制失败")
+        }
+    }
+
+    private fun guessExtension(uri: Uri): String {
+        val name = uri.lastPathSegment?.substringAfterLast('/') ?: return ".bin"
+        val dot = name.lastIndexOf('.')
+        if (dot <= 0) return ".bin"
+        val ext = name.substring(dot).lowercase()
+        return if (ext.length in 2..8 && ext.all { it.isLetterOrDigit() || it == '.' }) {
+            ext
+        } else {
+            ".bin"
+        }
     }
 
     private fun validateKeys(settings: UserSettings) {
@@ -377,5 +598,6 @@ class OfflineReprocessPipeline(
     companion object {
         private const val TAG = "OfflineReprocess"
         private const val MAX_ATTEMPTS = 3
+        private const val TITLE_CALL_TIMEOUT_MS = 20_000L
     }
 }

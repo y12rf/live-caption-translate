@@ -52,6 +52,7 @@ class AppContainer(context: Context) {
     )
 
     val reprocessPipeline = OfflineReprocessPipeline(
+        appContext = appContext,
         scope = appScope,
         asr = asrClient,
         llm = llmClient,

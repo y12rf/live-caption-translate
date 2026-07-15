@@ -60,7 +60,7 @@
     <string name="source_file">文件</string>
     <string name="start_file">选择文件</string>
     <string name="file_pick_cancelled">未选择文件</string>
-    <string name="file_import_started">开始导入并翻译…</string>
+    <string name="file_import_started">开始导入（分块识别 + 标点切句）…</string>
     <string name="reprocess_menu">重新识别翻译</string>
     <string name="reprocess_cancel">取消重跑</string>
     <string name="reprocess_running">正在事后识别翻译…</string>

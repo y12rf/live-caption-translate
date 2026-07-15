@@ -191,11 +191,8 @@ fun LiveTranslateScreen(
         } catch (_: SecurityException) {
             // Some providers do not support persistable grants; open stream still works now.
         }
-        viewModel.setAudioSource(AudioSourceType.File)
         viewModel.startFromFile(uri)
-        if (viewModel.state.value.overlayEnabled) {
-            SubtitleOverlayService.start(context)
-        }
+        // File import uses offline Re pipeline (no live subtitle stream).
         android.widget.Toast.makeText(
             context,
             context.getString(R.string.file_import_started),
@@ -380,6 +377,13 @@ fun LiveTranslateScreen(
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.tertiary
                 )
+                reprocess.sessionTitle?.let { t ->
+                    Text(
+                        text = "标题：$t",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                }
             }
 
             // Network / backlog banner
@@ -617,8 +621,10 @@ fun LiveTranslateScreen(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                val canStart = state.phase == SessionPhase.Idle ||
-                    state.phase == SessionPhase.Paused
+                val reprocessBusy = reprocess.phase == ReprocessPhase.Running ||
+                    reprocess.phase == ReprocessPhase.Cancelling
+                val canStart = (state.phase == SessionPhase.Idle ||
+                    state.phase == SessionPhase.Paused) && !reprocessBusy
                 Button(
                     onClick = {
                         if (state.phase == SessionPhase.Paused) {
@@ -655,19 +661,26 @@ fun LiveTranslateScreen(
                     enabled = state.audioSource != AudioSourceType.File &&
                         (state.phase == SessionPhase.Recording ||
                             state.phase == SessionPhase.Processing) &&
-                        !state.draining,
+                        !state.draining &&
+                        !reprocessBusy,
                     modifier = Modifier.weight(1f)
                 ) { Text("Pause") }
                 OutlinedButton(
                     onClick = {
-                        if (state.audioSource == AudioSourceType.File) {
-                            // File sessions do not use RecordingService FGS
-                            stopDialogOpen = true
+                        if (reprocessBusy || state.audioSource == AudioSourceType.File) {
+                            // Offline file / reprocess: cancel without drain dialog
+                            viewModel.stop(drain = false)
+                            android.widget.Toast.makeText(
+                                context,
+                                context.getString(R.string.reprocess_cancel),
+                                android.widget.Toast.LENGTH_SHORT
+                            ).show()
                         } else {
                             stopDialogOpen = true
                         }
                     },
-                    enabled = state.phase != SessionPhase.Idle && !state.draining,
+                    enabled = (state.phase != SessionPhase.Idle || reprocessBusy) &&
+                        !state.draining,
                     modifier = Modifier.weight(1f)
                 ) { Text("Stop") }
             }
