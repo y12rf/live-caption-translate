@@ -8,6 +8,7 @@ import androidx.lifecycle.viewModelScope
 import com.example.livetranslate.data.CacheCleaner
 import com.example.livetranslate.data.network.ApiLatencyProbe
 import com.example.livetranslate.data.settings.SettingsRepository
+import com.example.livetranslate.data.settings.SettingsValidation
 import com.example.livetranslate.data.settings.UserSettings
 import com.example.livetranslate.di.AppContainer
 import com.example.livetranslate.domain.SessionController
@@ -23,6 +24,7 @@ import kotlinx.coroutines.withContext
 
 data class SettingsUiState(
     val draft: UserSettings = UserSettings(),
+    val warnings: List<String> = emptyList(),
     val savedMessage: String? = null,
     val asrLatencyTesting: Boolean = false,
     val llmLatencyTesting: Boolean = false,
@@ -45,15 +47,21 @@ class SettingsViewModel(
     init {
         viewModelScope.launch {
             repo.settings.collect { s ->
-                _ui.update { it.copy(draft = s) }
+                val v = SettingsValidation.validate(s)
+                _ui.update {
+                    it.copy(draft = s, warnings = v.warnings)
+                }
             }
         }
     }
 
     fun updateDraft(transform: (UserSettings) -> UserSettings) {
         _ui.update {
+            val next = transform(it.draft)
+            val v = SettingsValidation.validate(next)
             it.copy(
-                draft = transform(it.draft),
+                draft = next,
+                warnings = v.warnings,
                 savedMessage = null,
                 asrLatencyResult = null,
                 llmLatencyResult = null,
@@ -65,20 +73,24 @@ class SettingsViewModel(
     fun save() {
         viewModelScope.launch {
             val draft = _ui.value.draft
+            val validated = SettingsValidation.validate(draft)
             val previousLang = AppLocale.normalize(
                 runCatching { repo.settings.first().uiLanguage }.getOrDefault(AppLocale.EN)
             )
-            val nextLang = AppLocale.normalize(draft.uiLanguage)
-            repo.update { draft }
+            val nextLang = AppLocale.normalize(validated.sanitized.uiLanguage)
+            repo.update { validated.sanitized }
             // Apply UI locale after DataStore write so string resources refresh.
             AppLocale.apply(nextLang)
             val langChanged = previousLang != nextLang
             _ui.update {
                 it.copy(
-                    savedMessage = if (langChanged) {
-                        "Saved · language applied"
-                    } else {
-                        "Saved"
+                    draft = validated.sanitized,
+                    warnings = validated.warnings,
+                    savedMessage = buildString {
+                        append(if (langChanged) "Saved · language applied" else "Saved")
+                        if (validated.warnings.isNotEmpty()) {
+                            append(" · ${validated.warnings.size} warning(s)")
+                        }
                     }
                 )
             }

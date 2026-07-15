@@ -231,6 +231,17 @@
     <string name="settings_info_overlay">Floating caption size, colors, and stack order over other apps.</string>
     <string name="settings_prompt_title">System prompt</string>
     <string name="settings_full_url_title">Full URL</string>
+    <string name="settings_pipeline">Pipeline / offline</string>
+    <string name="settings_pipeline_info">Offline reprocess &amp; file import:\n• VAD batch size — sentences packed per ASR call (default 70)\n• Title threshold — LLM title after N turns\n• Network retries — ASR/LLM auto retries\n• Translation cache — session cache size</string>
+    <string name="settings_offline_vad_batch">Offline VAD batch (sentences / ASR)</string>
+    <string name="settings_title_threshold">Title after N turns</string>
+    <string name="settings_max_attempts">Network retry attempts</string>
+    <string name="settings_translation_cache">Translation cache max</string>
+    <string name="settings_display">Display</string>
+    <string name="settings_display_info">Live screen options:\n• Keep screen on — prevents sleep during listening\n• Immersive mode — hide status/navigation bars (swipe to show)</string>
+    <string name="settings_keep_screen_on">Keep screen on (Live)</string>
+    <string name="settings_immersive">Immersive mode (Live)</string>
+    <string name="settings_warnings">Warnings</string>
 
     <!-- Share helper -->
     <string name="share_content_empty">Content is empty</string>

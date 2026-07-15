@@ -47,6 +47,21 @@ data class UserSettings(
     val minUtteranceMs: Int = 1_700,
     val energyThreshold: Double = 400.0,
     val contextWindowSize: Int = 2,
+    /**
+     * Offline file / reprocess: VAD sentences packed into one ASR request.
+     * Default 70.
+     */
+    val offlineVadBatchSize: Int = 70,
+    /** Generate LLM session title after this many completed turns. */
+    val titleTurnThreshold: Int = 10,
+    /** ASR/LLM automatic retry attempts (1–10). */
+    val maxNetworkAttempts: Int = 3,
+    /** In-session translation cache capacity (0 = disabled growth still allows put until clear). */
+    val translationCacheMax: Int = 50,
+    /** Keep screen awake on Live screen. */
+    val keepScreenOn: Boolean = false,
+    /** Hide system bars on Live screen (swipe to show transiently). */
+    val immersiveMode: Boolean = false,
     // Floating subtitle overlay
     /** Max width in dp (clamped to screen). */
     val overlayMaxWidthDp: Int = 360,

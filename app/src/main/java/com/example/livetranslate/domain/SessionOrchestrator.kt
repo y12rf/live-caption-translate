@@ -877,8 +877,11 @@ class SessionOrchestrator(
         }
         var attempt = 0
         var lastError: Exception? = null
+        val maxAttempts = runCatching {
+            settingsRepo.settings.first().maxNetworkAttempts.coerceIn(1, 10)
+        }.getOrDefault(MAX_ATTEMPTS)
         try {
-            while (attempt < MAX_ATTEMPTS) {
+            while (attempt < maxAttempts) {
                 try {
                     awaitOnline("识别")
                     val settings = effectiveSettings(settingsRepo.settings.first())
@@ -921,7 +924,7 @@ class SessionOrchestrator(
                 } catch (e: RetryableException) {
                     lastError = e
                     attempt++
-                    if (attempt >= MAX_ATTEMPTS) break
+                    if (attempt >= maxAttempts) break
                     delay(500L * attempt * attempt)
                 } catch (e: Exception) {
                     lastError = e
@@ -956,8 +959,11 @@ class SessionOrchestrator(
         var attempt = 0
         var lastError: Exception? = null
         var bestPartial = ""
+        val maxAttempts = runCatching {
+            settingsRepo.settings.first().maxNetworkAttempts.coerceIn(1, 10)
+        }.getOrDefault(MAX_ATTEMPTS)
         try {
-            while (attempt < MAX_ATTEMPTS) {
+            while (attempt < maxAttempts) {
                 try {
                     awaitOnline("翻译")
                     val settings = effectiveSettings(settingsRepo.settings.first())
@@ -975,7 +981,7 @@ class SessionOrchestrator(
                     }
                     lastError = e
                     attempt++
-                    if (attempt >= MAX_ATTEMPTS) break
+                    if (attempt >= maxAttempts) break
                     delay(500L * attempt * attempt)
                 } catch (e: Exception) {
                     if (bestPartial.trim().length >= MIN_PARTIAL_ZH) {
@@ -1194,20 +1200,28 @@ class SessionOrchestrator(
     }
 
     private fun maybeRequestSessionTitle(turnCount: Int) {
-        if (turnCount < LlmClient.TITLE_TURN_THRESHOLD) return
-        if (!titleRequested.compareAndSet(false, true)) return
-        val segsSnapshot = _state.value.segments
-            .filter { it.source.isNotBlank() }
-            .take(LlmClient.TITLE_TURN_THRESHOLD)
-        if (segsSnapshot.isEmpty()) {
-            titleRequested.set(false)
-            return
-        }
+        if (titleRequested.get()) return
         titleJob = scope.launch {
             try {
-                if (!network.isOnline()) return@launch
                 val settings = settingsRepo.settings.first()
-                if (settings.llmApiKey.isBlank()) return@launch
+                val threshold = settings.titleTurnThreshold.coerceIn(1, 50)
+                if (turnCount < threshold) return@launch
+                if (!titleRequested.compareAndSet(false, true)) return@launch
+                val segsSnapshot = _state.value.segments
+                    .filter { it.source.isNotBlank() }
+                    .take(threshold)
+                if (segsSnapshot.isEmpty()) {
+                    titleRequested.set(false)
+                    return@launch
+                }
+                if (!network.isOnline()) {
+                    titleRequested.set(false)
+                    return@launch
+                }
+                if (settings.llmApiKey.isBlank()) {
+                    titleRequested.set(false)
+                    return@launch
+                }
                 val config = LlmConfig(
                     baseUrl = settings.normalizedLlmBaseUrl(),
                     apiKey = settings.llmApiKey.trim(),

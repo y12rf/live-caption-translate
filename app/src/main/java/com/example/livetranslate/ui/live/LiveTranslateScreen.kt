@@ -43,18 +43,24 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import android.view.WindowManager
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.WindowInsetsControllerCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LifecycleEventEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -78,12 +84,51 @@ fun LiveTranslateScreen(
     val state by viewModel.state.collectAsStateWithLifecycle()
     val orphan by viewModel.orphanPrompt.collectAsStateWithLifecycle()
     val reprocess by viewModel.reprocessState.collectAsStateWithLifecycle()
+    val settings by viewModel.settings.collectAsStateWithLifecycle()
     val context = LocalContext.current
+    val view = LocalView.current
     val enScroll = rememberScrollState()
     val zhScroll = rememberScrollState()
     var pendingStartSource by remember { mutableStateOf(AudioSourceType.Microphone) }
     var exportMenuOpen by remember { mutableStateOf(false) }
     var stopDialogOpen by remember { mutableStateOf(false) }
+
+    // Keep screen on (Live only)
+    DisposableEffect(settings.keepScreenOn) {
+        val activity = context as? Activity
+        val window = activity?.window
+        if (settings.keepScreenOn && window != null) {
+            window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        }
+        onDispose {
+            window?.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        }
+    }
+
+    // Immersive system bars (Live only)
+    DisposableEffect(settings.immersiveMode) {
+        val activity = context as? Activity
+        val window = activity?.window
+        if (window != null) {
+            val controller = WindowInsetsControllerCompat(window, view)
+            if (settings.immersiveMode) {
+                WindowCompat.setDecorFitsSystemWindows(window, false)
+                controller.hide(WindowInsetsCompat.Type.systemBars())
+                controller.systemBarsBehavior =
+                    WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+            } else {
+                WindowCompat.setDecorFitsSystemWindows(window, true)
+                controller.show(WindowInsetsCompat.Type.systemBars())
+            }
+        }
+        onDispose {
+            if (window != null) {
+                val controller = WindowInsetsControllerCompat(window, view)
+                WindowCompat.setDecorFitsSystemWindows(window, true)
+                controller.show(WindowInsetsCompat.Type.systemBars())
+            }
+        }
+    }
 
     LifecycleEventEffect(Lifecycle.Event.ON_RESUME) {
         viewModel.checkOrphans()

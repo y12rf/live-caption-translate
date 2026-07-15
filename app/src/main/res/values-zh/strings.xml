@@ -218,6 +218,17 @@
     <string name="settings_info_overlay">悬浮字幕尺寸、颜色与上下顺序（显示在其他应用上层）。</string>
     <string name="settings_prompt_title">System prompt</string>
     <string name="settings_full_url_title">完整 URL</string>
+    <string name="settings_pipeline">管线 / 离线</string>
+    <string name="settings_pipeline_info">事后重跑与文件导入：\n• VAD 批大小 — 每批 ASR 合并的 VAD 句数（默认 70）\n• 标题阈值 — 满 N 句后生成 LLM 标题\n• 网络重试 — ASR/LLM 自动重试次数\n• 翻译缓存 — 会话内缓存容量</string>
+    <string name="settings_offline_vad_batch">离线 VAD 批大小（句/次 ASR）</string>
+    <string name="settings_title_threshold">满 N 句后生成标题</string>
+    <string name="settings_max_attempts">网络重试次数</string>
+    <string name="settings_translation_cache">翻译缓存上限</string>
+    <string name="settings_display">显示</string>
+    <string name="settings_display_info">主界面选项：\n• 屏幕常亮 — 听讲时不熄屏\n• 沉浸模式 — 隐藏状态栏/导航栏（边缘滑出）</string>
+    <string name="settings_keep_screen_on">屏幕常亮（主界面）</string>
+    <string name="settings_immersive">沉浸模式（主界面）</string>
+    <string name="settings_warnings">警告</string>
 
     <string name="share_content_empty">内容为空</string>
     <string name="share_export_ok">已导出到下载: %1$s</string>

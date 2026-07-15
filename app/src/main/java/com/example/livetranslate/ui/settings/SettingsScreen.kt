@@ -698,6 +698,81 @@ fun SettingsScreen(
             }
 
             Spacer(Modifier.height(16.dp))
+            val pipelineTitle = stringResource(R.string.settings_pipeline)
+            val pipelineInfo = stringResource(R.string.settings_pipeline_info)
+            val displayTitle = stringResource(R.string.settings_display)
+            val displayInfo = stringResource(R.string.settings_display_info)
+            sectionTitle(
+                title = pipelineTitle,
+                onInfo = { showInfo(pipelineTitle, pipelineInfo) }
+            )
+            field(
+                label = stringResource(R.string.settings_offline_vad_batch),
+                value = d.offlineVadBatchSize.toString(),
+                onChange = {
+                    it.toIntOrNull()?.let { v ->
+                        viewModel.updateDraft { s -> s.copy(offlineVadBatchSize = v) }
+                    }
+                }
+            )
+            field(
+                label = stringResource(R.string.settings_title_threshold),
+                value = d.titleTurnThreshold.toString(),
+                onChange = {
+                    it.toIntOrNull()?.let { v ->
+                        viewModel.updateDraft { s -> s.copy(titleTurnThreshold = v) }
+                    }
+                }
+            )
+            field(
+                label = stringResource(R.string.settings_max_attempts),
+                value = d.maxNetworkAttempts.toString(),
+                onChange = {
+                    it.toIntOrNull()?.let { v ->
+                        viewModel.updateDraft { s -> s.copy(maxNetworkAttempts = v) }
+                    }
+                }
+            )
+            field(
+                label = stringResource(R.string.settings_translation_cache),
+                value = d.translationCacheMax.toString(),
+                onChange = {
+                    it.toIntOrNull()?.let { v ->
+                        viewModel.updateDraft { s -> s.copy(translationCacheMax = v) }
+                    }
+                }
+            )
+
+            Spacer(Modifier.height(16.dp))
+            sectionTitle(
+                title = displayTitle,
+                onInfo = { showInfo(displayTitle, displayInfo) }
+            )
+            switchField(
+                label = stringResource(R.string.settings_keep_screen_on),
+                checked = d.keepScreenOn,
+                onChange = { viewModel.updateDraft { s -> s.copy(keepScreenOn = it) } }
+            )
+            switchField(
+                label = stringResource(R.string.settings_immersive),
+                checked = d.immersiveMode,
+                onChange = { viewModel.updateDraft { s -> s.copy(immersiveMode = it) } }
+            )
+
+            if (ui.warnings.isNotEmpty()) {
+                Spacer(Modifier.height(16.dp))
+                sectionTitle(stringResource(R.string.settings_warnings))
+                ui.warnings.forEach { msg ->
+                    Text(
+                        text = "⚠ $msg",
+                        color = MaterialTheme.colorScheme.error,
+                        style = MaterialTheme.typography.bodySmall,
+                        modifier = Modifier.padding(vertical = 2.dp)
+                    )
+                }
+            }
+
+            Spacer(Modifier.height(16.dp))
             Button(
                 onClick = viewModel::save,
                 modifier = Modifier.fillMaxWidth()

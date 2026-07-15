@@ -270,9 +270,10 @@ class OfflineReprocessPipeline(
             activeAudioPath = audioPath
         )
 
-        // VAD cut sentences, pack every UTTERANCES_PER_ASR into one ASR upload.
+        // VAD cut sentences, pack every offlineVadBatchSize into one ASR upload.
+        val batchSize = settings.offlineVadBatchSize.coerceIn(1, 200)
         val chunks = try {
-            WavChunker.chunkByVad(file, settings, WavChunker.UTTERANCES_PER_ASR) { progress, _ ->
+            WavChunker.chunkByVad(file, settings, batchSize) { progress, _ ->
                 _state.update {
                     it.copy(
                         message = str(
@@ -390,7 +391,8 @@ class OfflineReprocessPipeline(
         segments: List<TranscriptSegment>,
         settings: UserSettings
     ): String? {
-        if (segments.size < LlmClient.TITLE_TURN_THRESHOLD) return null
+        val titleThreshold = settings.titleTurnThreshold.coerceIn(1, 50)
+        if (segments.size < titleThreshold) return null
         if (settings.llmApiKey.isBlank()) return null
         if (!network.isOnline()) return null
         checkCancel()
@@ -398,7 +400,7 @@ class OfflineReprocessPipeline(
         return try {
             withTimeoutOrNull(TITLE_CALL_TIMEOUT_MS) {
                 llm.summarizeSessionTitle(
-                    segments = segments,
+                    segments = segments.take(titleThreshold),
                     config = LlmConfig(
                         baseUrl = settings.normalizedLlmBaseUrl(),
                         apiKey = settings.llmApiKey.trim(),
@@ -481,9 +483,10 @@ class OfflineReprocessPipeline(
         chunk: WavChunker.PcmChunk,
         settings: UserSettings
     ): String {
+        val maxAttempts = settings.maxNetworkAttempts.coerceIn(1, 10)
         var attempt = 0
         var last: Exception? = null
-        while (attempt < MAX_ATTEMPTS) {
+        while (attempt < maxAttempts) {
             checkCancel()
             try {
                 awaitOnline()
@@ -493,7 +496,7 @@ class OfflineReprocessPipeline(
             } catch (e: Exception) {
                 last = e
                 attempt++
-                if (attempt >= MAX_ATTEMPTS || !isRetryable(e)) break
+                if (attempt >= maxAttempts || !isRetryable(e)) break
                 delay(500L * attempt * attempt)
             }
         }
@@ -507,9 +510,10 @@ class OfflineReprocessPipeline(
         context: List<ContextTurn>,
         settings: UserSettings
     ): String {
+        val maxAttempts = settings.maxNetworkAttempts.coerceIn(1, 10)
         var attempt = 0
         var last: Exception? = null
-        while (attempt < MAX_ATTEMPTS) {
+        while (attempt < maxAttempts) {
             checkCancel()
             try {
                 awaitOnline()
@@ -519,7 +523,7 @@ class OfflineReprocessPipeline(
             } catch (e: Exception) {
                 last = e
                 attempt++
-                if (attempt >= MAX_ATTEMPTS || !isRetryable(e)) break
+                if (attempt >= maxAttempts || !isRetryable(e)) break
                 delay(500L * attempt * attempt)
             }
         }
@@ -616,7 +620,6 @@ class OfflineReprocessPipeline(
 
     companion object {
         private const val TAG = "OfflineReprocess"
-        private const val MAX_ATTEMPTS = 3
         private const val TITLE_CALL_TIMEOUT_MS = 20_000L
     }
 }

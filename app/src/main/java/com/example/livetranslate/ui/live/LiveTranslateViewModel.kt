@@ -7,6 +7,8 @@ import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import com.example.livetranslate.data.OrphanRecordingDetector
 import com.example.livetranslate.data.history.ExportTextMode
+import com.example.livetranslate.data.settings.SettingsRepository
+import com.example.livetranslate.data.settings.UserSettings
 import com.example.livetranslate.di.AppContainer
 import com.example.livetranslate.domain.LiveSessionUiState
 import com.example.livetranslate.domain.OfflineReprocessPipeline
@@ -16,18 +18,23 @@ import com.example.livetranslate.domain.SessionController
 import com.example.livetranslate.domain.model.AudioSourceType
 import com.example.livetranslate.domain.model.SessionPhase
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
 class LiveTranslateViewModel(
     app: Application,
     private val controller: SessionController,
-    private val reprocess: OfflineReprocessPipeline
+    private val reprocess: OfflineReprocessPipeline,
+    settingsRepo: SettingsRepository
 ) : AndroidViewModel(app) {
 
     val state: StateFlow<LiveSessionUiState> = controller.state
     val reprocessState: StateFlow<ReprocessUiState> = reprocess.state
+    val settings: StateFlow<UserSettings> = settingsRepo.settings
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), UserSettings())
 
     data class OrphanPrompt(
         val path: String,
@@ -159,7 +166,8 @@ class LiveTranslateViewModel(
             return LiveTranslateViewModel(
                 app = app,
                 controller = container.sessionController,
-                reprocess = container.reprocessPipeline
+                reprocess = container.reprocessPipeline,
+                settingsRepo = container.settingsRepository
             ) as T
         }
     }
