@@ -17,8 +17,8 @@ data class UtteranceAudio(
     val sampleRate: Int,
     val reason: CutReason,
     /**
-     * Offset into the continuous session recording (pause time excluded),
-     * stamped when the utterance is cut / enqueued. Used for SRT timing.
+     * Start offset into continuous session recording (pause excluded), ms.
+     * Sentence head — not cut/end time. Used for SRT cue start and history seek.
      */
     val offsetMs: Long = 0L
 ) {
@@ -64,8 +64,7 @@ data class TranscriptSegment(
     /** Absolute wall-clock ms when the segment was finalized. */
     val timestampMs: Long = System.currentTimeMillis(),
     /**
-     * ms into continuous recording (pauses excluded), for SRT / audio align.
-     * Prefer utterance cut time over translation-complete wall clock.
+     * Sentence-start ms into continuous recording (pauses excluded), for SRT / seek.
      */
     val offsetMs: Long = 0L,
     /**

@@ -419,11 +419,19 @@ class SessionOrchestrator(
         if (collector?.isActive == true) return
         collector = scope.launch {
             audio.utterances.collect { utt ->
-                // File mode stamps offset at cut; live capture uses wall clock elapsed.
+                // File mode already stamps sentence-start offset in FileAudioSegmenter.
+                // Live mic/internal: VAD emits at cut (end); convert to sentence-start.
                 val stamped = if (audio.sourceType == AudioSourceType.File) {
                     utt
                 } else {
-                    utt.copy(offsetMs = currentRecordedElapsedMs())
+                    val endMs = currentRecordedElapsedMs()
+                    utt.copy(
+                        offsetMs = UtteranceOffsets.startOffsetMs(
+                            endElapsedMs = endMs,
+                            pcmBytes = utt.pcm.size,
+                            sampleRate = utt.sampleRate
+                        )
+                    )
                 }
                 enqueueUtterance(stamped)
             }

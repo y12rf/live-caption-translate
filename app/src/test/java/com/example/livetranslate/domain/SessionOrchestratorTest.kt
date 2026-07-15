@@ -22,11 +22,23 @@ class SessionOrchestratorTest {
         val pcm = ByteArray(4) { it.toByte() }
         val u = UtteranceAudio(pcm, 16_000, CutReason.Silence, offsetMs = 12_500L)
         assertEquals(12_500L, u.offsetMs)
-        // Retry / queue path must keep the cut-time stamp (not re-derived at translate time).
+        // Retry / queue path must keep the start stamp (not re-derived at translate time).
         val retried = u.copy()
         assertEquals(12_500L, retried.offsetMs)
         assertEquals(u, retried)
         assertNotEquals(u, u.copy(offsetMs = 0L))
+    }
+
+    @Test
+    fun liveOffset_usesSentenceStartNotCutEnd() {
+        // 1s of 16 kHz mono 16-bit PCM
+        val pcmBytes = 16_000 * 2
+        val endElapsed = 5_000L
+        assertEquals(
+            4_000L,
+            UtteranceOffsets.startOffsetMs(endElapsed, pcmBytes, 16_000)
+        )
+        assertEquals(0L, UtteranceOffsets.startOffsetMs(500L, pcmBytes, 16_000))
     }
 
     @Test
