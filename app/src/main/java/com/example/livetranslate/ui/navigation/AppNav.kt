@@ -65,7 +65,12 @@ fun AppNav(container: AppContainer) {
             HistoryDetailScreen(
                 sessionId = id,
                 viewModel = vm,
-                onBack = { nav.popBackStack() }
+                onBack = { nav.popBackStack() },
+                onOpenSession = { newId ->
+                    nav.navigate(Routes.historyDetail(newId)) {
+                        popUpTo(Routes.historyDetail(id)) { inclusive = true }
+                    }
+                }
             )
         }
     }

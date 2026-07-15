@@ -30,8 +30,11 @@ data class UserSettings(
      * LLM system prompt template. Placeholders:
      * - `{{to}}` → output language (e.g. zh / Chinese)
      * - `{{from}}` → input language (e.g. en / English)
+     * - `{{glossary}}` → formatted glossary lines (may be empty)
      */
     val llmSystemPrompt: String = DEFAULT_LLM_SYSTEM_PROMPT,
+    /** Global glossary pairs for `{{glossary}}` injection. */
+    val glossaryTerms: List<GlossaryEntry> = emptyList(),
     val inputLanguage: String = "en",
     val outputLanguage: String = "zh",
     val silenceMs: Int = 500,
@@ -77,11 +80,13 @@ data class UserSettings(
         llmSystemPrompt
             .replace("{{to}}", outputLanguage)
             .replace("{{from}}", inputLanguage)
+            .replace("{{glossary}}", GlossaryCodec.formatBlock(glossaryTerms))
 
     companion object {
         const val DEFAULT_LLM_SYSTEM_PROMPT: String =
             "你是一位精通 {{to}} 专业母语译者，致力于提供流畅、地道、符合表达习惯且高保真的翻译。" +
-                "uh,yeah这种口水话请略过不要翻译，可以结合上下文修正语音识别的错误，修正口吃的重复表达"
+                "uh,yeah这种口水话请略过不要翻译，可以结合上下文修正语音识别的错误，修正口吃的重复表达。" +
+                "术语表（须优先遵守；可为空）：\n{{glossary}}"
 
         const val DEFAULT_OVERLAY_BG = "#000000"
         const val DEFAULT_OVERLAY_EN = "#FFFFFF"

@@ -1,49 +1,65 @@
 package com.example.livetranslate.ui.history
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Share
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Slider
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.livetranslate.R
 import com.example.livetranslate.data.audio.SessionAudioRecorder
 import com.example.livetranslate.data.history.ExportTextMode
 import com.example.livetranslate.data.history.HistoryExport
+import com.example.livetranslate.domain.ReprocessPhase
 import com.example.livetranslate.util.RecordingShareHelper
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import java.util.concurrent.TimeUnit
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -141,17 +157,36 @@ fun HistoryScreen(
 fun HistoryDetailScreen(
     sessionId: Long,
     viewModel: HistoryViewModel,
-    onBack: () -> Unit
+    onBack: () -> Unit,
+    onOpenSession: (Long) -> Unit = {}
 ) {
     val detail by viewModel.detail.collectAsStateWithLifecycle()
     val detailQuery by viewModel.detailQuery.collectAsStateWithLifecycle()
     val filtered by viewModel.filteredSegments.collectAsStateWithLifecycle()
+    val playback by viewModel.playback.collectAsStateWithLifecycle()
+    val reprocess by viewModel.reprocessState.collectAsStateWithLifecycle()
     val context = LocalContext.current
     val wallFmt = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault())
     var menuOpen by remember { mutableStateOf(false) }
+    val listState = rememberLazyListState()
 
     LaunchedEffect(sessionId) {
         viewModel.loadDetail(sessionId)
+    }
+
+    DisposableEffect(Unit) {
+        onDispose { viewModel.onLeaveDetail() }
+    }
+
+    LaunchedEffect(reprocess.lastSavedSessionId) {
+        val id = reprocess.lastSavedSessionId ?: return@LaunchedEffect
+        viewModel.clearReprocessSaved()
+        android.widget.Toast.makeText(
+            context,
+            context.getString(R.string.reprocess_saved),
+            android.widget.Toast.LENGTH_SHORT
+        ).show()
+        onOpenSession(id)
     }
 
     fun toastEmpty() {
@@ -174,6 +209,19 @@ fun HistoryDetailScreen(
             baseName = viewModel.exportBaseName(nameSuffix),
             extension = "srt",
             mimeType = "application/x-subrip"
+        )
+    }
+
+    if (reprocess.error != null) {
+        AlertDialog(
+            onDismissRequest = viewModel::clearReprocessError,
+            title = { Text(stringResource(R.string.reprocess_error_title)) },
+            text = { Text(reprocess.error!!) },
+            confirmButton = {
+                TextButton(onClick = viewModel::clearReprocessError) {
+                    Text("OK")
+                }
+            }
         )
     }
 
@@ -212,6 +260,28 @@ fun HistoryDetailScreen(
                         expanded = menuOpen,
                         onDismissRequest = { menuOpen = false }
                     ) {
+                        val reprocessEnabled = viewModel.canReprocess() &&
+                            reprocess.phase == ReprocessPhase.Idle
+                        DropdownMenuItem(
+                            text = { Text(stringResource(R.string.reprocess_menu)) },
+                            onClick = {
+                                menuOpen = false
+                                viewModel.startReprocessCurrent()
+                            },
+                            enabled = reprocessEnabled
+                        )
+                        if (reprocess.phase == ReprocessPhase.Running ||
+                            reprocess.phase == ReprocessPhase.Cancelling
+                        ) {
+                            DropdownMenuItem(
+                                text = { Text(stringResource(R.string.reprocess_cancel)) },
+                                onClick = {
+                                    menuOpen = false
+                                    viewModel.cancelReprocess()
+                                }
+                            )
+                        }
+                        HorizontalDivider()
                         DropdownMenuItem(
                             text = { Text(stringResource(R.string.export_srt)) },
                             onClick = {
@@ -316,6 +386,27 @@ fun HistoryDetailScreen(
                     .fillMaxSize()
                     .padding(padding)
             ) {
+                if (reprocess.phase == ReprocessPhase.Running ||
+                    reprocess.phase == ReprocessPhase.Cancelling
+                ) {
+                    Column(
+                        Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp, vertical = 8.dp)
+                    ) {
+                        Text(
+                            reprocess.message.ifBlank { stringResource(R.string.reprocess_running) },
+                            style = MaterialTheme.typography.bodyMedium
+                        )
+                        Spacer(Modifier.height(4.dp))
+                        LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+                        TextButton(onClick = viewModel::cancelReprocess) {
+                            Text(stringResource(R.string.reprocess_cancel))
+                        }
+                    }
+                    HorizontalDivider()
+                }
+
                 OutlinedTextField(
                     value = detailQuery,
                     onValueChange = viewModel::setDetailQuery,
@@ -335,9 +426,12 @@ fun HistoryDetailScreen(
                         }
                     }
                 )
+
                 LazyColumn(
+                    state = listState,
                     modifier = Modifier
-                        .fillMaxSize()
+                        .weight(1f)
+                        .fillMaxWidth()
                         .padding(horizontal = 16.dp)
                 ) {
                     item {
@@ -353,6 +447,12 @@ fun HistoryDetailScreen(
                                         " · ${FileSizeLabel(d.session.audioPath)}",
                                     style = MaterialTheme.typography.labelMedium,
                                     color = MaterialTheme.colorScheme.primary
+                                )
+                            }
+                            if (playback.hasTimeline) {
+                                Text(
+                                    stringResource(R.string.history_tap_segment_hint),
+                                    style = MaterialTheme.typography.labelSmall
                                 )
                             }
                             if (detailQuery.isNotBlank()) {
@@ -381,11 +481,31 @@ fun HistoryDetailScreen(
                         }
                     } else {
                         items(filtered, key = { it.id }) { seg ->
-                            Column(modifier = Modifier.padding(vertical = 12.dp)) {
+                            val active = playback.activeSegmentId == seg.id
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .then(
+                                        if (playback.hasTimeline && playback.prepared) {
+                                            Modifier.clickable { viewModel.seekToSegment(seg) }
+                                        } else {
+                                            Modifier
+                                        }
+                                    )
+                                    .background(
+                                        if (active) {
+                                            MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.35f)
+                                        } else {
+                                            MaterialTheme.colorScheme.surface
+                                        }
+                                    )
+                                    .padding(vertical = 12.dp)
+                            ) {
                                 Text(
                                     "[${HistoryExport.formatOffset(seg.offsetMs)}]  " +
                                         wallFmt.format(Date(seg.createdAt)),
-                                    style = MaterialTheme.typography.labelSmall
+                                    style = MaterialTheme.typography.labelSmall,
+                                    fontWeight = if (active) FontWeight.Bold else FontWeight.Normal
                                 )
                                 Text("EN: ${seg.source}")
                                 Text("ZH: ${seg.translation}")
@@ -395,9 +515,67 @@ fun HistoryDetailScreen(
                         }
                     }
                 }
+
+                if (playback.hasTimeline && playback.prepared) {
+                    PlaybackBar(
+                        playing = playback.playing,
+                        positionMs = playback.positionMs,
+                        durationMs = playback.durationMs,
+                        onToggle = viewModel::togglePlayPause,
+                        onSeek = viewModel::seekTo
+                    )
+                }
             }
         }
     }
+}
+
+@Composable
+private fun PlaybackBar(
+    playing: Boolean,
+    positionMs: Int,
+    durationMs: Int,
+    onToggle: () -> Unit,
+    onSeek: (Int) -> Unit
+) {
+    val dur = durationMs.coerceAtLeast(0)
+    val pos = positionMs.coerceIn(0, if (dur > 0) dur else positionMs)
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .background(MaterialTheme.colorScheme.surfaceVariant)
+            .padding(horizontal = 12.dp, vertical = 8.dp)
+    ) {
+        Slider(
+            value = if (dur > 0) pos.toFloat() else 0f,
+            onValueChange = { onSeek(it.toInt()) },
+            valueRange = 0f..(dur.coerceAtLeast(1).toFloat()),
+            modifier = Modifier.fillMaxWidth()
+        )
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Button(onClick = onToggle) {
+                Text(
+                    if (playing) stringResource(R.string.playback_pause)
+                    else stringResource(R.string.playback_play)
+                )
+            }
+            Spacer(Modifier.width(12.dp))
+            Text(
+                "${formatPlaybackTime(pos)} / ${formatPlaybackTime(dur)}",
+                style = MaterialTheme.typography.labelMedium
+            )
+        }
+    }
+}
+
+private fun formatPlaybackTime(ms: Int): String {
+    val totalSec = TimeUnit.MILLISECONDS.toSeconds(ms.coerceAtLeast(0).toLong())
+    val m = totalSec / 60
+    val s = totalSec % 60
+    return String.format(Locale.US, "%d:%02d", m, s)
 }
 
 @Composable

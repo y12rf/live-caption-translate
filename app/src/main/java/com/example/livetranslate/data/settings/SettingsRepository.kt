@@ -31,6 +31,7 @@ class SettingsRepository(private val context: Context) {
         val llmFullUrl = booleanPreferencesKey("llm_full_url")
         val llmThinking = stringPreferencesKey("llm_thinking")
         val llmSystemPrompt = stringPreferencesKey("llm_system_prompt")
+        val glossaryTerms = stringPreferencesKey("glossary_terms")
         val inputLanguage = stringPreferencesKey("input_language")
         val outputLanguage = stringPreferencesKey("output_language")
         val silenceMs = intPreferencesKey("silence_ms")
@@ -63,6 +64,7 @@ class SettingsRepository(private val context: Context) {
             llmFullUrl = p[Keys.llmFullUrl] ?: defaults.llmFullUrl,
             llmThinking = p[Keys.llmThinking] ?: defaults.llmThinking,
             llmSystemPrompt = p[Keys.llmSystemPrompt] ?: defaults.llmSystemPrompt,
+            glossaryTerms = GlossaryCodec.decode(p[Keys.glossaryTerms]),
             inputLanguage = p[Keys.inputLanguage] ?: defaults.inputLanguage,
             outputLanguage = p[Keys.outputLanguage] ?: defaults.outputLanguage,
             silenceMs = p[Keys.silenceMs] ?: defaults.silenceMs,
@@ -98,6 +100,7 @@ class SettingsRepository(private val context: Context) {
                 llmFullUrl = prefs[Keys.llmFullUrl] ?: d.llmFullUrl,
                 llmThinking = prefs[Keys.llmThinking] ?: d.llmThinking,
                 llmSystemPrompt = prefs[Keys.llmSystemPrompt] ?: d.llmSystemPrompt,
+                glossaryTerms = GlossaryCodec.decode(prefs[Keys.glossaryTerms]),
                 inputLanguage = prefs[Keys.inputLanguage] ?: d.inputLanguage,
                 outputLanguage = prefs[Keys.outputLanguage] ?: d.outputLanguage,
                 silenceMs = prefs[Keys.silenceMs] ?: d.silenceMs,
@@ -130,6 +133,7 @@ class SettingsRepository(private val context: Context) {
             prefs[Keys.llmSystemPrompt] = next.llmSystemPrompt.ifBlank {
                 UserSettings.DEFAULT_LLM_SYSTEM_PROMPT
             }
+            prefs[Keys.glossaryTerms] = GlossaryCodec.encode(next.glossaryTerms)
             prefs[Keys.inputLanguage] = next.inputLanguage
             prefs[Keys.outputLanguage] = next.outputLanguage
             prefs[Keys.silenceMs] = next.silenceMs

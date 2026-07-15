@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -269,7 +270,8 @@ fun SettingsScreen(
                         "System prompt",
                         "翻译用系统提示词。占位符：\n" +
                             "• {{to}} — 输出语言（设置里的 Output language）\n" +
-                            "• {{from}} — 输入语言（Input language）"
+                            "• {{from}} — 输入语言（Input language）\n" +
+                            "• {{glossary}} — 术语表（见下方；prompt 中无此占位符则不注入）"
                     )
                 }
             )
@@ -282,6 +284,92 @@ fun SettingsScreen(
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Text("Reset prompt to default")
+            }
+            OutlinedButton(
+                onClick = {
+                    viewModel.updateDraft { s ->
+                        if (s.llmSystemPrompt.contains("{{glossary}}")) s
+                        else s.copy(
+                            llmSystemPrompt = s.llmSystemPrompt.trimEnd() +
+                                "\n术语表（须优先遵守；可为空）：\n{{glossary}}"
+                        )
+                    }
+                },
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Text(stringResource(R.string.glossary_insert_placeholder))
+            }
+
+            Spacer(Modifier.height(16.dp))
+            sectionTitle(
+                title = stringResource(R.string.glossary_section),
+                onInfo = {
+                    showInfo(
+                        "术语表",
+                        "全局源→译对照，经 {{glossary}} 注入 LLM system prompt。\n" +
+                            "空术语表时 {{glossary}} 渲染为空。\n最多 100 条。"
+                    )
+                }
+            )
+            d.glossaryTerms.forEachIndexed { index, entry ->
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    OutlinedTextField(
+                        value = entry.source,
+                        onValueChange = { v ->
+                            viewModel.updateDraft { s ->
+                                val list = s.glossaryTerms.toMutableList()
+                                list[index] = list[index].copy(source = v)
+                                s.copy(glossaryTerms = list)
+                            }
+                        },
+                        label = { Text(stringResource(R.string.glossary_source)) },
+                        modifier = Modifier.weight(1f),
+                        singleLine = true
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    OutlinedTextField(
+                        value = entry.target,
+                        onValueChange = { v ->
+                            viewModel.updateDraft { s ->
+                                val list = s.glossaryTerms.toMutableList()
+                                list[index] = list[index].copy(target = v)
+                                s.copy(glossaryTerms = list)
+                            }
+                        },
+                        label = { Text(stringResource(R.string.glossary_target)) },
+                        modifier = Modifier.weight(1f),
+                        singleLine = true
+                    )
+                    TextButton(
+                        onClick = {
+                            viewModel.updateDraft { s ->
+                                s.copy(
+                                    glossaryTerms = s.glossaryTerms.filterIndexed { i, _ -> i != index }
+                                )
+                            }
+                        }
+                    ) {
+                        Text("删")
+                    }
+                }
+                Spacer(Modifier.height(6.dp))
+            }
+            OutlinedButton(
+                onClick = {
+                    viewModel.updateDraft { s ->
+                        if (s.glossaryTerms.size >= 100) s
+                        else s.copy(
+                            glossaryTerms = s.glossaryTerms +
+                                com.example.livetranslate.data.settings.GlossaryEntry("", "")
+                        )
+                    }
+                },
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Text(stringResource(R.string.glossary_add))
             }
 
             Spacer(Modifier.height(16.dp))

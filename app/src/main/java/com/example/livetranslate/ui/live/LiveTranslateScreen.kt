@@ -55,7 +55,10 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LifecycleEventEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.example.livetranslate.domain.ReprocessPhase
 import com.example.livetranslate.R
 import com.example.livetranslate.data.history.ExportTextMode
 import com.example.livetranslate.data.history.HistoryExport
@@ -73,12 +76,68 @@ fun LiveTranslateScreen(
     onOpenHistory: () -> Unit
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
+    val orphan by viewModel.orphanPrompt.collectAsStateWithLifecycle()
+    val reprocess by viewModel.reprocessState.collectAsStateWithLifecycle()
     val context = LocalContext.current
     val enScroll = rememberScrollState()
     val zhScroll = rememberScrollState()
     var pendingStartSource by remember { mutableStateOf(AudioSourceType.Microphone) }
     var exportMenuOpen by remember { mutableStateOf(false) }
     var stopDialogOpen by remember { mutableStateOf(false) }
+
+    LifecycleEventEffect(Lifecycle.Event.ON_RESUME) {
+        viewModel.checkOrphans()
+    }
+
+    LaunchedEffect(reprocess.lastSavedSessionId) {
+        val id = reprocess.lastSavedSessionId ?: return@LaunchedEffect
+        viewModel.clearReprocessSaved()
+        android.widget.Toast.makeText(
+            context,
+            context.getString(R.string.reprocess_saved) + " (#$id)",
+            android.widget.Toast.LENGTH_SHORT
+        ).show()
+    }
+
+    if (orphan != null) {
+        AlertDialog(
+            onDismissRequest = { /* require explicit action */ },
+            title = { Text(stringResource(R.string.orphan_title)) },
+            text = {
+                Text(
+                    stringResource(R.string.orphan_message) + "\n\n${orphan!!.label}"
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = viewModel::orphanReprocess) {
+                    Text(stringResource(R.string.orphan_reprocess))
+                }
+            },
+            dismissButton = {
+                Row {
+                    TextButton(onClick = viewModel::orphanDiscard) {
+                        Text(stringResource(R.string.orphan_discard))
+                    }
+                    TextButton(onClick = viewModel::orphanLater) {
+                        Text(stringResource(R.string.orphan_later))
+                    }
+                }
+            }
+        )
+    }
+
+    if (reprocess.error != null) {
+        AlertDialog(
+            onDismissRequest = viewModel::clearReprocessError,
+            title = { Text(stringResource(R.string.reprocess_error_title)) },
+            text = { Text(reprocess.error!!) },
+            confirmButton = {
+                TextButton(onClick = viewModel::clearReprocessError) {
+                    Text("OK")
+                }
+            }
+        )
+    }
 
     fun toastExportEmpty() {
         android.widget.Toast.makeText(
@@ -308,6 +367,18 @@ fun LiveTranslateScreen(
                     text = status,
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.primary
+                )
+            }
+            if (reprocess.phase == ReprocessPhase.Running ||
+                reprocess.phase == ReprocessPhase.Cancelling
+            ) {
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    text = reprocess.message.ifBlank {
+                        stringResource(R.string.reprocess_running)
+                    },
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.tertiary
                 )
             }
 

@@ -16,11 +16,40 @@ class UserSettingsTest {
     }
 
     @Test
+    fun renderLlmSystemPrompt_glossaryEmptyAndFilled() {
+        val empty = UserSettings(
+            llmSystemPrompt = "T:\n{{glossary}}",
+            glossaryTerms = emptyList()
+        )
+        assertEquals("T:\n", empty.renderLlmSystemPrompt())
+
+        val filled = UserSettings(
+            llmSystemPrompt = "T:\n{{glossary}}",
+            glossaryTerms = listOf(GlossaryEntry("API", "接口"))
+        )
+        assertEquals("T:\nAPI → 接口", filled.renderLlmSystemPrompt())
+    }
+
+    @Test
+    fun render_withoutGlossaryPlaceholder_doesNotInject() {
+        val s = UserSettings(
+            llmSystemPrompt = "plain only {{to}}",
+            outputLanguage = "zh",
+            glossaryTerms = listOf(GlossaryEntry("a", "b"))
+        )
+        val r = s.renderLlmSystemPrompt()
+        assertEquals("plain only zh", r)
+        assertTrue(!r.contains("a → b"))
+    }
+
+    @Test
     fun defaultPrompt_containsToPlaceholder() {
         assertTrue(UserSettings.DEFAULT_LLM_SYSTEM_PROMPT.contains("{{to}}"))
+        assertTrue(UserSettings.DEFAULT_LLM_SYSTEM_PROMPT.contains("{{glossary}}"))
         val rendered = UserSettings(outputLanguage = "Chinese").renderLlmSystemPrompt()
         assertTrue(rendered.contains("Chinese"))
         assertTrue(!rendered.contains("{{to}}"))
+        assertTrue(!rendered.contains("{{glossary}}"))
     }
 
     @Test

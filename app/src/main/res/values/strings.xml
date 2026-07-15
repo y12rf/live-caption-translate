@@ -61,4 +61,23 @@
     <string name="start_file">选择文件</string>
     <string name="file_pick_cancelled">未选择文件</string>
     <string name="file_import_started">开始导入并翻译…</string>
+    <string name="reprocess_menu">重新识别翻译</string>
+    <string name="reprocess_cancel">取消重跑</string>
+    <string name="reprocess_running">正在事后识别翻译…</string>
+    <string name="reprocess_saved">新会话已保存</string>
+    <string name="reprocess_error_title">重跑失败</string>
+    <string name="history_tap_segment_hint">点按句子可跳转录音位置</string>
+    <string name="playback_play">播放</string>
+    <string name="playback_pause">暂停</string>
+    <string name="orphan_title">发现未保存录音</string>
+    <string name="orphan_message">检测到未关联历史的录音文件（可能因杀后台导致会话未入库）。可事后识别翻译、丢弃，或稍后处理。</string>
+    <string name="orphan_reprocess">事后识别</string>
+    <string name="orphan_discard">丢弃</string>
+    <string name="orphan_later">稍后</string>
+    <string name="glossary_section">术语表</string>
+    <string name="glossary_source">源语术语</string>
+    <string name="glossary_target">译语</string>
+    <string name="glossary_add">添加术语</string>
+    <string name="glossary_insert_placeholder">插入 {{glossary}}</string>
+    <string name="glossary_empty_hint">空术语表时 {{glossary}} 渲染为空</string>
 </resources>

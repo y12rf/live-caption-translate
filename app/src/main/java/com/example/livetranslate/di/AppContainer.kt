@@ -6,7 +6,9 @@ import com.example.livetranslate.data.history.HistoryRepository
 import com.example.livetranslate.data.llm.LlmClient
 import com.example.livetranslate.data.network.NetworkMonitor
 import com.example.livetranslate.data.settings.SettingsRepository
+import com.example.livetranslate.domain.OfflineReprocessPipeline
 import com.example.livetranslate.domain.SessionController
+import com.example.livetranslate.domain.model.SessionPhase
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -47,6 +49,19 @@ class AppContainer(context: Context) {
         settingsRepo = settingsRepository,
         history = historyRepository,
         network = networkMonitor
+    )
+
+    val reprocessPipeline = OfflineReprocessPipeline(
+        scope = appScope,
+        asr = asrClient,
+        llm = llmClient,
+        settingsRepo = settingsRepository,
+        history = historyRepository,
+        network = networkMonitor,
+        isLiveSessionBusy = {
+            val phase = sessionController.state.value.phase
+            phase != SessionPhase.Idle
+        }
     )
 
     init {
