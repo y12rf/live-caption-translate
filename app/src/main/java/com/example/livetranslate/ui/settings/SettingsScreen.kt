@@ -1,5 +1,6 @@
 package com.example.livetranslate.ui.settings
 
+import android.widget.Toast
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -21,8 +22,11 @@ import androidx.compose.material3.ExposedDropdownMenuBox
 import androidx.compose.material3.ExposedDropdownMenuDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
@@ -33,11 +37,18 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LifecycleEventEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.example.livetranslate.R
 import com.example.livetranslate.data.asr.ApiAuthStyle
 import com.example.livetranslate.data.asr.AsrApiStyle
+import com.example.livetranslate.data.llm.LlmThinkingMode
 import com.example.livetranslate.data.settings.UserSettings
+import com.example.livetranslate.util.KeepAliveHelper
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -47,8 +58,17 @@ fun SettingsScreen(
 ) {
     val ui by viewModel.ui.collectAsStateWithLifecycle()
     val d = ui.draft
+    val context = LocalContext.current
     var infoTitle by remember { mutableStateOf<String?>(null) }
     var infoBody by remember { mutableStateOf("") }
+    var ignoringBattery by remember {
+        mutableStateOf(KeepAliveHelper.isIgnoringBatteryOptimizations(context))
+    }
+
+    // Refresh status when returning from system battery settings
+    LifecycleEventEffect(Lifecycle.Event.ON_RESUME) {
+        ignoringBattery = KeepAliveHelper.isIgnoringBatteryOptimizations(context)
+    }
 
     fun showInfo(title: String, body: String) {
         infoTitle = title
@@ -95,10 +115,21 @@ fun SettingsScreen(
                 onInfo = {
                     showInfo(
                         "ASR API URL",
-                        "若 URL 在 /v1/ 后面还有路径（完整接口），则原样使用。\n" +
-                            "若只填站点或只到 …/v1，则按 OpenAI 风格自动补 path：\n" +
+                        "默认：若 /v1/ 后已有路径则原样使用；否则自动补 path：\n" +
                             "• OpenAiTranscriptions → /v1/audio/transcriptions\n" +
-                            "• ChatCompletionsAudio → /v1/chat/completions"
+                            "• ChatCompletionsAudio → /v1/chat/completions\n\n" +
+                            "打开「完整 URL」后：不做任何路径拼接，按填写内容原样请求。"
+                    )
+                }
+            )
+            switchField(
+                label = "完整 URL（不拼接 path）",
+                checked = d.asrFullUrl,
+                onChange = { viewModel.updateDraft { s -> s.copy(asrFullUrl = it) } },
+                onInfo = {
+                    showInfo(
+                        "完整 URL",
+                        "开启后，上方 API URL 将原样作为请求地址，不再拼接 /v1/… 路径。"
                     )
                 }
             )
@@ -139,6 +170,17 @@ fun SettingsScreen(
                     )
                 }
             )
+            Button(
+                onClick = viewModel::testAsrLatency,
+                enabled = !ui.asrLatencyTesting,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Text(if (ui.asrLatencyTesting) "Testing ASR…" else "Test ASR latency")
+            }
+            ui.asrLatencyResult?.let {
+                Spacer(Modifier.height(4.dp))
+                Text(it)
+            }
 
             Spacer(Modifier.height(16.dp))
             sectionTitle("LLM")
@@ -149,8 +191,20 @@ fun SettingsScreen(
                 onInfo = {
                     showInfo(
                         "LLM API URL",
-                        "若 /v1/ 后已有路径则原样使用。\n" +
-                            "否则补全为 OpenAI 风格：/v1/chat/completions"
+                        "默认：若 /v1/ 后已有路径则原样使用；\n" +
+                            "否则补全为 OpenAI 风格：/v1/chat/completions\n\n" +
+                            "打开「完整 URL」后：不做任何路径拼接，按填写内容原样请求。"
+                    )
+                }
+            )
+            switchField(
+                label = "完整 URL（不拼接 path）",
+                checked = d.llmFullUrl,
+                onChange = { viewModel.updateDraft { s -> s.copy(llmFullUrl = it) } },
+                onInfo = {
+                    showInfo(
+                        "完整 URL",
+                        "开启后，上方 API URL 将原样作为请求地址，不再拼接 /v1/chat/completions。"
                     )
                 }
             )
@@ -180,18 +234,32 @@ fun SettingsScreen(
                     )
                 }
             )
+            dropdownField(
+                label = "Thinking",
+                value = d.llmThinking,
+                options = LlmThinkingMode.entries.map { it.name },
+                onSelect = { viewModel.updateDraft { s -> s.copy(llmThinking = it) } },
+                onInfo = {
+                    showInfo(
+                        "Thinking",
+                        "控制请求体中的 thinking 字段：\n" +
+                            "• Default — 不带 thinking 字段（默认）\n" +
+                            "• True — 发送 \"thinking\": true\n" +
+                            "• False — 发送 \"thinking\": false"
+                    )
+                }
+            )
             Button(
-                onClick = {
-                    viewModel.updateDraft { s ->
-                        s.copy(
-                            llmBaseUrl = "https://api.deepseek.com",
-                            llmModel = "deepseek-chat",
-                            llmAuthStyle = ApiAuthStyle.Bearer.name
-                        )
-                    }
-                },
+                onClick = viewModel::testLlmLatency,
+                enabled = !ui.llmLatencyTesting,
                 modifier = Modifier.fillMaxWidth()
-            ) { Text("Fill DeepSeek LLM defaults") }
+            ) {
+                Text(if (ui.llmLatencyTesting) "Testing LLM…" else "Test LLM latency")
+            }
+            ui.llmLatencyResult?.let {
+                Spacer(Modifier.height(4.dp))
+                Text(it)
+            }
             multilineField(
                 label = "Translation system prompt",
                 value = d.llmSystemPrompt,
@@ -291,6 +359,231 @@ fun SettingsScreen(
             )
 
             Spacer(Modifier.height(16.dp))
+            sectionTitle(
+                title = "Overlay (悬浮窗)",
+                onInfo = {
+                    showInfo(
+                        "悬浮窗",
+                        "控制字幕悬浮窗外观：\n" +
+                            "• 默认：译文在上、原文在下，中间横线分割\n" +
+                            "• 「译文在上」关闭后可调换为原文在上\n" +
+                            "• Max width / height dp — 最大宽高\n" +
+                            "• Alpha % — 背景不透明度 0–100\n" +
+                            "• 颜色 — 十六进制 #RRGGBB（如 #FFFFFF）\n" +
+                            "  背景色的透明度仍由 Alpha % 控制\n\n" +
+                            "交互：在录音通知中点 Unlock/Lock overlay；\n" +
+                            "解锁后可拖动悬浮窗，锁定后固定且触摸穿透。"
+                    )
+                }
+            )
+            switchField(
+                label = "译文在上 / 原文在下",
+                checked = d.overlayTranslationOnTop,
+                onChange = {
+                    viewModel.updateDraft { s -> s.copy(overlayTranslationOnTop = it) }
+                },
+                onInfo = {
+                    showInfo(
+                        "字幕顺序",
+                        "开启（默认）：译文在上，原文在下，中间横线分隔。\n" +
+                            "关闭：原文在上，译文在下。"
+                    )
+                }
+            )
+            field(
+                label = "Max width dp",
+                value = d.overlayMaxWidthDp.toString(),
+                onChange = {
+                    it.toIntOrNull()?.let { v ->
+                        viewModel.updateDraft { s -> s.copy(overlayMaxWidthDp = v) }
+                    }
+                }
+            )
+            field(
+                label = "Max height dp",
+                value = d.overlayMaxHeightDp.toString(),
+                onChange = {
+                    it.toIntOrNull()?.let { v ->
+                        viewModel.updateDraft { s -> s.copy(overlayMaxHeightDp = v) }
+                    }
+                }
+            )
+            field(
+                label = "Alpha % (0-100)",
+                value = d.overlayAlphaPercent.toString(),
+                onChange = {
+                    it.toIntOrNull()?.let { v ->
+                        viewModel.updateDraft { s -> s.copy(overlayAlphaPercent = v) }
+                    }
+                }
+            )
+            field(
+                label = "Background color",
+                value = d.overlayBgColor,
+                onChange = { viewModel.updateDraft { s -> s.copy(overlayBgColor = it) } }
+            )
+            field(
+                label = "EN text color",
+                value = d.overlayEnTextColor,
+                onChange = { viewModel.updateDraft { s -> s.copy(overlayEnTextColor = it) } }
+            )
+            field(
+                label = "ZH text color",
+                value = d.overlayZhTextColor,
+                onChange = { viewModel.updateDraft { s -> s.copy(overlayZhTextColor = it) } }
+            )
+            Button(
+                onClick = {
+                    viewModel.updateDraft { s ->
+                        s.copy(
+                            overlayBgColor = UserSettings.DEFAULT_OVERLAY_BG,
+                            overlayEnTextColor = UserSettings.DEFAULT_OVERLAY_EN,
+                            overlayZhTextColor = UserSettings.DEFAULT_OVERLAY_ZH,
+                            overlayAlphaPercent = 80,
+                            overlayTranslationOnTop = true
+                        )
+                    }
+                },
+                modifier = Modifier.fillMaxWidth()
+            ) { Text("Reset overlay colors") }
+
+            Spacer(Modifier.height(16.dp))
+            sectionTitle(
+                title = stringResource(R.string.keepalive_section),
+                onInfo = {
+                    showInfo(
+                        "保活 / 电池",
+                        "长时间录音/同传时，系统与厂商省电策略可能杀掉后台服务。\n\n" +
+                            "建议依次开启：\n" +
+                            "1. 忽略电池优化（最重要）\n" +
+                            "2. 厂商自启动 / 后台运行白名单（小米/华为/OPPO/Vivo 等）\n" +
+                            "3. 锁定任务（从多任务界面下拉加锁，若系统支持）\n\n" +
+                            "录音时 App 还会持有：\n" +
+                            "• 前台服务通知\n" +
+                            "• Partial WakeLock（防 CPU 休眠）\n" +
+                            "• WifiLock（稳定 ASR/LLM 网络）"
+                    )
+                }
+            )
+            Text(
+                text = if (ignoringBattery) {
+                    stringResource(R.string.keepalive_battery_ok)
+                } else {
+                    stringResource(R.string.keepalive_battery_need)
+                },
+                color = if (ignoringBattery) {
+                    MaterialTheme.colorScheme.primary
+                } else {
+                    MaterialTheme.colorScheme.error
+                },
+                modifier = Modifier.padding(vertical = 4.dp)
+            )
+            if (!ignoringBattery) {
+                Button(
+                    onClick = {
+                        KeepAliveHelper.requestIgnoreBatteryOptimizations(context)
+                    },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 4.dp)
+                ) {
+                    Text(stringResource(R.string.keepalive_request_battery))
+                }
+            } else {
+                OutlinedButton(
+                    onClick = {
+                        KeepAliveHelper.openBatteryOptimizationSettings(context)
+                    },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 4.dp)
+                ) {
+                    Text(stringResource(R.string.keepalive_open_battery_list))
+                }
+            }
+            OutlinedButton(
+                onClick = {
+                    val opened = KeepAliveHelper.openOemAutoStartSettings(context)
+                    if (!opened) {
+                        Toast.makeText(
+                            context,
+                            "未找到厂商页面，已打开应用详情",
+                            Toast.LENGTH_SHORT
+                        ).show()
+                    }
+                },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(vertical = 4.dp)
+            ) {
+                Text(stringResource(R.string.keepalive_oem_autostart))
+            }
+            OutlinedButton(
+                onClick = { KeepAliveHelper.openAppDetailsSettings(context) },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(vertical = 4.dp)
+            ) {
+                Text(stringResource(R.string.keepalive_app_details))
+            }
+
+            Spacer(Modifier.height(16.dp))
+            sectionTitle(
+                title = stringResource(R.string.cache_section),
+                onInfo = {
+                    showInfo(
+                        "缓存与数据",
+                        "• 清除缓存：清空本场翻译内存缓存，并删除未关联历史的孤立录音文件。\n" +
+                            "• 清除全部历史：删除所有历史会话与录音（不可恢复）。"
+                    )
+                }
+            )
+            Button(
+                onClick = viewModel::clearCache,
+                enabled = !ui.cacheBusy,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(vertical = 4.dp)
+            ) {
+                Text(
+                    if (ui.cacheBusy) stringResource(R.string.cache_busy)
+                    else stringResource(R.string.clear_cache)
+                )
+            }
+            var confirmClearHistory by remember { mutableStateOf(false) }
+            OutlinedButton(
+                onClick = { confirmClearHistory = true },
+                enabled = !ui.cacheBusy,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(vertical = 4.dp)
+            ) {
+                Text(stringResource(R.string.clear_all_history))
+            }
+            if (confirmClearHistory) {
+                AlertDialog(
+                    onDismissRequest = { confirmClearHistory = false },
+                    title = { Text(stringResource(R.string.clear_all_history)) },
+                    text = { Text(stringResource(R.string.clear_all_history_confirm)) },
+                    confirmButton = {
+                        TextButton(onClick = {
+                            confirmClearHistory = false
+                            viewModel.clearAllHistory()
+                        }) { Text(stringResource(R.string.confirm)) }
+                    },
+                    dismissButton = {
+                        TextButton(onClick = { confirmClearHistory = false }) {
+                            Text(stringResource(R.string.cancel))
+                        }
+                    }
+                )
+            }
+            ui.cacheMessage?.let {
+                Spacer(Modifier.height(4.dp))
+                Text(it, color = MaterialTheme.colorScheme.primary)
+            }
+
+            Spacer(Modifier.height(16.dp))
             Button(
                 onClick = viewModel::save,
                 modifier = Modifier.fillMaxWidth()
@@ -380,6 +673,27 @@ private fun dropdownField(
                 )
             }
         }
+    }
+}
+
+@Composable
+private fun switchField(
+    label: String,
+    checked: Boolean,
+    onChange: (Boolean) -> Unit,
+    onInfo: (() -> Unit)? = null
+) {
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 6.dp)
+    ) {
+        Text(label, modifier = Modifier.weight(1f))
+        if (onInfo != null) {
+            InfoButton(onClick = onInfo)
+        }
+        Switch(checked = checked, onCheckedChange = onChange)
     }
 }
 

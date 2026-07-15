@@ -4,6 +4,7 @@ import android.content.Context
 import android.media.projection.MediaProjection
 import com.example.livetranslate.data.asr.AsrClient
 import com.example.livetranslate.data.audio.AudioCapture
+import com.example.livetranslate.data.history.ExportTextMode
 import com.example.livetranslate.data.history.HistoryRepository
 import com.example.livetranslate.data.llm.LlmClient
 import com.example.livetranslate.data.settings.SettingsRepository
@@ -60,6 +61,14 @@ class SessionController(
     fun stop() = orchestrator.stop()
     fun retry() = orchestrator.retryLastFailed()
     fun exportMarkdown(): String? = orchestrator.exportMarkdown()
+    fun exportSrt(mode: ExportTextMode = ExportTextMode.Both): String? =
+        orchestrator.exportSrt(mode)
+
+    fun exportPlain(mode: ExportTextMode): String? = orchestrator.exportPlain(mode)
+
+    fun clearTranslationCache() = orchestrator.clearTranslationCache()
+
+    fun translationCacheSize(): Int = orchestrator.translationCacheSize()
 
     fun reportCaptureError(message: String) = orchestrator.reportCaptureError(message)
 

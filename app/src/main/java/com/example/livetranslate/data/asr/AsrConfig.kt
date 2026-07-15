@@ -31,5 +31,7 @@ data class AsrConfig(
     val model: String,
     val language: String,
     val apiStyle: AsrApiStyle = AsrApiStyle.OpenAiTranscriptions,
-    val authStyle: ApiAuthStyle = ApiAuthStyle.Bearer
+    val authStyle: ApiAuthStyle = ApiAuthStyle.Bearer,
+    /** When true, use [baseUrl] as-is (no path append). */
+    val fullUrl: Boolean = false
 )

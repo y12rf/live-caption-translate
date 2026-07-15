@@ -13,8 +13,8 @@ android {
         applicationId = "com.example.livetranslate"
         minSdk = 26
         targetSdk = 34
-        versionCode = 2
-        versionName = "0.2.0"
+        versionCode = 3
+        versionName = "1.0.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         // Real phones need arm*; include all common ABIs so install does not fail with
         // "native libraries do not support the device's CPU architecture"
@@ -33,6 +33,8 @@ android {
     buildTypes {
         release {
             isMinifyEnabled = false
+            // Sideload-ready release; replace with a real upload keystore for Play Store.
+            signingConfig = signingConfigs.getByName("debug")
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"

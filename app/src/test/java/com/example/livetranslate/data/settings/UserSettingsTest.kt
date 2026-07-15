@@ -22,4 +22,22 @@ class UserSettingsTest {
         assertTrue(rendered.contains("Chinese"))
         assertTrue(!rendered.contains("{{to}}"))
     }
+
+    @Test
+    fun parseColorHex_rrggbb() {
+        assertEquals(0xFFFF0000.toInt(), UserSettings.parseColorHex("#FF0000", 0))
+        assertEquals(0xFF00FF00.toInt(), UserSettings.parseColorHex("00FF00", 0))
+    }
+
+    @Test
+    fun parseColorHex_shortAndArgb() {
+        assertEquals(0xFFFFFFFF.toInt(), UserSettings.parseColorHex("#FFF", 0))
+        assertEquals(0x80FF0000.toInt(), UserSettings.parseColorHex("#80FF0000", 0))
+    }
+
+    @Test
+    fun normalizeColorHex_invalidFallsBack() {
+        assertEquals("#FFFFFF", UserSettings.normalizeColorHex("nope", "#FFFFFF"))
+        assertEquals("#112233", UserSettings.normalizeColorHex("#112233", "#000000"))
+    }
 }

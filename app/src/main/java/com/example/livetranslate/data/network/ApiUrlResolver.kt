@@ -18,12 +18,21 @@ object ApiUrlResolver {
     /**
      * @param userUrl whatever the user typed in settings
      * @param openAiStylePath default path starting with `/`, e.g. `/v1/chat/completions`
+     * @param fullUrl when true, never append paths — use [userUrl] as the final endpoint
      */
-    fun resolve(userUrl: String, openAiStylePath: String): String {
+    fun resolve(
+        userUrl: String,
+        openAiStylePath: String,
+        fullUrl: Boolean = false
+    ): String {
         val trimmed = userUrl.trim()
         require(trimmed.isNotEmpty()) { "API URL is empty" }
 
         val url = trimmed.trimEnd('/')
+        if (fullUrl) {
+            return url
+        }
+
         val path = if (openAiStylePath.startsWith("/")) openAiStylePath else "/$openAiStylePath"
 
         // Complete endpoint: .../v1/<something>

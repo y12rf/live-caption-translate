@@ -47,4 +47,18 @@ class ApiUrlResolverTest {
         val full = "https://gateway.example.com/proxy/v1/foo/bar"
         assertEquals(full, ApiUrlResolver.resolve(full, "/v1/chat/completions"))
     }
+
+    @Test
+    fun fullUrlFlag_neverAppendsPath() {
+        val custom = "https://my.gateway.com/custom/translate"
+        assertEquals(
+            custom,
+            ApiUrlResolver.resolve(custom, "/v1/chat/completions", fullUrl = true)
+        )
+        // Without flag, host-only still appends
+        assertEquals(
+            "https://api.openai.com/v1/chat/completions",
+            ApiUrlResolver.resolve("https://api.openai.com", "/v1/chat/completions", fullUrl = false)
+        )
+    }
 }

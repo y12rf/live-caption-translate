@@ -13,18 +13,29 @@ enum class AudioSourceType {
 data class UtteranceAudio(
     val pcm: ByteArray,
     val sampleRate: Int,
-    val reason: CutReason
+    val reason: CutReason,
+    /**
+     * Offset into the continuous session recording (pause time excluded),
+     * stamped when the utterance is cut / enqueued. Used for SRT timing.
+     */
+    val offsetMs: Long = 0L
 ) {
     override fun equals(other: Any?): Boolean {
         if (this === other) return true
         if (other !is UtteranceAudio) return false
         return sampleRate == other.sampleRate &&
             reason == other.reason &&
+            offsetMs == other.offsetMs &&
             pcm.contentEquals(other.pcm)
     }
 
-    override fun hashCode(): Int =
-        31 * (31 * pcm.contentHashCode() + sampleRate) + reason.hashCode()
+    override fun hashCode(): Int {
+        var h = pcm.contentHashCode()
+        h = 31 * h + sampleRate
+        h = 31 * h + reason.hashCode()
+        h = 31 * h + offsetMs.hashCode()
+        return h
+    }
 }
 
 data class ContextTurn(val source: String, val translation: String)
@@ -50,6 +61,9 @@ data class TranscriptSegment(
     val incomplete: Boolean = false,
     /** Absolute wall-clock ms when the segment was finalized. */
     val timestampMs: Long = System.currentTimeMillis(),
-    /** ms since session start. */
+    /**
+     * ms into continuous recording (pauses excluded), for SRT / audio align.
+     * Prefer utterance cut time over translation-complete wall clock.
+     */
     val offsetMs: Long = 0L
 )

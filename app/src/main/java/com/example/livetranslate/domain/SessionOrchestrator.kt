@@ -4,11 +4,13 @@ import com.example.livetranslate.data.asr.AsrClient
 import com.example.livetranslate.data.asr.AsrConfig
 import com.example.livetranslate.data.asr.AsrOutputSanitizer
 import com.example.livetranslate.data.audio.AudioCapture
+import com.example.livetranslate.data.history.ExportTextMode
 import com.example.livetranslate.data.history.HistoryExport
 import com.example.livetranslate.data.history.HistoryRepository
 import com.example.livetranslate.data.llm.LlmClient
 import com.example.livetranslate.data.llm.LlmConfig
 import com.example.livetranslate.data.settings.SettingsRepository
+import com.example.livetranslate.data.settings.UserSettings
 import com.example.livetranslate.domain.model.AsrStreamEvent
 import com.example.livetranslate.domain.model.AudioSourceType
 import com.example.livetranslate.domain.model.ContextTurn
@@ -29,6 +31,9 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeoutOrNull
+import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicInteger
 
 data class LiveSessionUiState(
     val phase: SessionPhase = SessionPhase.Idle,
@@ -45,11 +50,17 @@ data class LiveSessionUiState(
     /** Accumulated recording time in ms (pauses excluded). */
     val recordedElapsedMs: Long = 0L,
     val audioSource: AudioSourceType = AudioSourceType.Microphone,
-    val overlayEnabled: Boolean = false
+    val overlayEnabled: Boolean = false,
+    /** LLM title after ≥10 turns; null until generated. */
+    val sessionTitle: String? = null
 )
 
 /**
- * Serial pipeline: utterance queue → ASR stream → LLM stream → UI state.
+ * Pipelined session:
+ * utterance queue → ASR (serial) → translate queue → LLM (serial).
+ *
+ * ASR of utterance N+1 can run while LLM still translates N, so the overlay
+ * stays closer to live audio instead of waiting on full ASR+LLM per chunk.
  */
 class SessionOrchestrator(
     private val scope: CoroutineScope,
@@ -62,8 +73,10 @@ class SessionOrchestrator(
     private val _state = MutableStateFlow(LiveSessionUiState())
     val state: StateFlow<LiveSessionUiState> = _state.asStateFlow()
 
-    private val queue = Channel<UtteranceAudio>(Channel.UNLIMITED)
-    private var worker: Job? = null
+    private var utteranceQueue = Channel<UtteranceAudio>(Channel.UNLIMITED)
+    private var translateQueue = Channel<PendingTranslate>(Channel.UNLIMITED)
+    private var asrWorker: Job? = null
+    private var llmWorker: Job? = null
     private var collector: Job? = null
     private var timerJob: Job? = null
     private var sessionStartedAt: Long = 0L
@@ -71,7 +84,25 @@ class SessionOrchestrator(
     private var segmentClockStart: Long = 0L
     private val contextWindow = ArrayDeque<ContextTurn>()
     private var lastFailed: UtteranceAudio? = null
-    private var processJob: Job? = null
+
+    /**
+     * Per-session translation cache (latest 50). Cleared on session start/stop.
+     * Only touched from the serial LLM worker so emit order stays FIFO.
+     */
+    private val translationCache = TranslationCache(TranslationCache.DEFAULT_MAX_SIZE)
+
+    private val asrInFlight = AtomicInteger(0)
+    private val llmInFlight = AtomicInteger(0)
+    private val translatePending = AtomicInteger(0)
+
+    /** Guards concurrent stop() from UI + notification so history is saved at most once. */
+    private val stopOnce = AtomicBoolean(false)
+
+    /** LLM session title (filled once at 10 turns). */
+    @Volatile
+    private var sessionTitle: String? = null
+    private val titleRequested = AtomicBoolean(false)
+    private var titleJob: Job? = null
 
     fun setAudioSource(type: AudioSourceType) {
         if (_state.value.phase != SessionPhase.Idle) return
@@ -82,6 +113,14 @@ class SessionOrchestrator(
     fun setOverlayEnabled(enabled: Boolean) {
         _state.update { it.copy(overlayEnabled = enabled) }
     }
+
+    /** Clear in-memory translation cache (settings / user action). */
+    fun clearTranslationCache() {
+        translationCache.clear()
+        android.util.Log.i(TAG, "translation cache cleared")
+    }
+
+    fun translationCacheSize(): Int = translationCache.size
 
     /** Surface background capture failures (internal audio) to UI without crashing. */
     fun reportCaptureError(message: String) {
@@ -99,12 +138,24 @@ class SessionOrchestrator(
     fun start() {
         val current = _state.value.phase
         if (current == SessionPhase.Recording || current == SessionPhase.Processing) return
+        // A previous stop() may still be finalizing; ignore start until Idle is restored.
+        if (stopOnce.get() && current != SessionPhase.Paused) return
 
         if (current == SessionPhase.Idle) {
+            stopOnce.set(false)
             sessionStartedAt = System.currentTimeMillis()
             recordedElapsedMs = 0L
             contextWindow.clear()
+            translationCache.clear()
+            resetTitleState()
             audio.sourceType = _state.value.audioSource
+            // Auto-save continuous WAV for the whole session
+            try {
+                audio.beginSessionRecording(sessionStartedAt)
+            } catch (e: Exception) {
+                // Non-fatal: translation still works without archive
+                android.util.Log.w("SessionOrchestrator", "beginSessionRecording failed", e)
+            }
             _state.value = LiveSessionUiState(
                 phase = SessionPhase.Recording,
                 sessionStartedAt = sessionStartedAt,
@@ -113,6 +164,8 @@ class SessionOrchestrator(
                 overlayEnabled = _state.value.overlayEnabled
             )
         } else {
+            // Resume from Paused — keep stopOnce false so a later stop works.
+            stopOnce.set(false)
             _state.update {
                 it.copy(
                     phase = SessionPhase.Recording,
@@ -123,18 +176,23 @@ class SessionOrchestrator(
         }
 
         segmentClockStart = System.currentTimeMillis()
-        ensureWorker()
+        ensureWorkers()
         ensureTimer()
         if (collector?.isActive != true) {
             collector = scope.launch {
                 audio.utterances.collect { utt ->
-                    queue.send(utt)
+                    // Stamp recording-relative offset at cut time (pauses excluded).
+                    utteranceQueue.send(utt.copy(offsetMs = currentRecordedElapsedMs()))
                 }
             }
         }
         try {
             audio.start()
         } catch (e: Exception) {
+            if (current == SessionPhase.Idle) {
+                // New session never started capture — drop empty WAV
+                audio.discardSessionRecording()
+            }
             _state.update {
                 it.copy(
                     phase = SessionPhase.Idle,
@@ -142,6 +200,7 @@ class SessionOrchestrator(
                 )
             }
             stopTimer()
+            stopOnce.set(false)
         }
     }
 
@@ -158,32 +217,78 @@ class SessionOrchestrator(
     }
 
     fun stop() {
+        // Idempotent: UI + FGS notification / double-tap must save history at most once.
+        if (!stopOnce.compareAndSet(false, true)) return
+        if (_state.value.phase == SessionPhase.Idle) {
+            stopOnce.set(false)
+            return
+        }
+
         accumulateElapsed()
         audio.stop(flush = true)
         collector?.cancel()
         collector = null
-        processJob?.cancel()
-        processJob = null
+        asrWorker?.cancel()
+        asrWorker = null
+        llmWorker?.cancel()
+        llmWorker = null
+        // Drop queued work; recreate channels for next session.
+        utteranceQueue.close()
+        translateQueue.close()
+        utteranceQueue = Channel(Channel.UNLIMITED)
+        translateQueue = Channel(Channel.UNLIMITED)
+        asrInFlight.set(0)
+        llmInFlight.set(0)
+        translatePending.set(0)
         stopTimer()
         val snapshot = _state.value
         val started = sessionStartedAt
+        val audioPath = try {
+            audio.finishSessionRecording()
+        } catch (e: Exception) {
+            android.util.Log.w("SessionOrchestrator", "finishSessionRecording failed", e)
+            null
+        }
+        // Keep transcript on screen until save finishes (export still works); gate blocks re-entry.
         scope.launch {
-            if (snapshot.segments.isNotEmpty()) {
-                history.saveSession(
-                    started,
-                    System.currentTimeMillis(),
-                    snapshot.segments
+            try {
+                // Wait briefly if title LLM is still running (≥10 turns)
+                withTimeoutOrNull(TITLE_WAIT_MS) {
+                    titleJob?.join()
+                }
+                val title = sessionTitle?.takeIf { it.isNotBlank() }
+                    ?: snapshot.sessionTitle?.takeIf { it.isNotBlank() }
+                // Persist if we have transcript and/or a non-empty session WAV
+                if (snapshot.segments.isNotEmpty() || audioPath != null) {
+                    try {
+                        history.saveSession(
+                            startedAt = started,
+                            endedAt = System.currentTimeMillis(),
+                            segments = snapshot.segments,
+                            audioPath = audioPath,
+                            title = title
+                        )
+                    } catch (e: Exception) {
+                        android.util.Log.e("SessionOrchestrator", "saveSession failed", e)
+                    }
+                } else {
+                    audio.discardSessionRecording()
+                }
+            } finally {
+                contextWindow.clear()
+                translationCache.clear()
+                resetTitleState()
+                lastFailed = null
+                sessionStartedAt = 0L
+                recordedElapsedMs = 0L
+                _state.value = LiveSessionUiState(
+                    phase = SessionPhase.Idle,
+                    audioSource = audio.sourceType,
+                    overlayEnabled = snapshot.overlayEnabled
                 )
+                // Allow the next session to stop again.
+                stopOnce.set(false)
             }
-            contextWindow.clear()
-            lastFailed = null
-            sessionStartedAt = 0L
-            recordedElapsedMs = 0L
-            _state.value = LiveSessionUiState(
-                phase = SessionPhase.Idle,
-                audioSource = audio.sourceType,
-                overlayEnabled = snapshot.overlayEnabled
-            )
         }
     }
 
@@ -191,7 +296,10 @@ class SessionOrchestrator(
         val u = lastFailed ?: return
         lastFailed = null
         _state.update { it.copy(error = null, canRetry = false) }
-        scope.launch { processUtterance(u) }
+        ensureWorkers()
+        scope.launch {
+            utteranceQueue.send(u)
+        }
     }
 
     fun exportMarkdown(): String? {
@@ -201,6 +309,41 @@ class SessionOrchestrator(
             s.sessionStartedAt.takeIf { it > 0 } ?: System.currentTimeMillis(),
             s.segments
         )
+    }
+
+    fun exportSrt(mode: ExportTextMode = ExportTextMode.Both): String? {
+        val s = _state.value
+        if (s.segments.isEmpty()) return null
+        val srt = HistoryExport.formatSrtFromLive(
+            segments = s.segments,
+            mode = mode,
+            sessionDurationMs = s.recordedElapsedMs
+        )
+        return srt.ifBlank { null }
+    }
+
+    fun exportPlain(mode: ExportTextMode): String? {
+        val s = _state.value
+        if (s.segments.isEmpty()) return null
+        val text = s.segments.mapNotNull { seg ->
+            when (mode) {
+                ExportTextMode.TranslationOnly ->
+                    seg.translation.trim().ifEmpty { null }
+                ExportTextMode.SourceOnly ->
+                    seg.source.trim().ifEmpty { null }
+                ExportTextMode.Both -> {
+                    val zh = seg.translation.trim()
+                    val en = seg.source.trim()
+                    when {
+                        zh.isNotEmpty() && en.isNotEmpty() -> "$zh\n$en"
+                        zh.isNotEmpty() -> zh
+                        en.isNotEmpty() -> en
+                        else -> null
+                    }
+                }
+            }
+        }.joinToString("\n\n")
+        return text.ifBlank { null }
     }
 
     private fun accumulateElapsed() {
@@ -213,6 +356,21 @@ class SessionOrchestrator(
         }
     }
 
+    /** Continuous recording clock: excludes paused time. */
+    private fun currentRecordedElapsedMs(): Long {
+        val base = recordedElapsedMs
+        val phase = _state.value.phase
+        val extra = if (
+            segmentClockStart > 0L &&
+            (phase == SessionPhase.Recording || phase == SessionPhase.Processing)
+        ) {
+            System.currentTimeMillis() - segmentClockStart
+        } else {
+            0L
+        }
+        return (base + extra).coerceAtLeast(0L)
+    }
+
     private fun ensureTimer() {
         if (timerJob?.isActive == true) return
         timerJob = scope.launch {
@@ -220,12 +378,8 @@ class SessionOrchestrator(
                 delay(500)
                 val phase = _state.value.phase
                 if (phase == SessionPhase.Recording || phase == SessionPhase.Processing) {
-                    val base = recordedElapsedMs
-                    val extra = if (segmentClockStart > 0) {
-                        System.currentTimeMillis() - segmentClockStart
-                    } else 0L
                     _state.update {
-                        it.copy(recordedElapsedMs = base + extra)
+                        it.copy(recordedElapsedMs = currentRecordedElapsedMs())
                     }
                 }
             }
@@ -237,62 +391,142 @@ class SessionOrchestrator(
         timerJob = null
     }
 
-    private fun ensureWorker() {
-        if (worker?.isActive == true) return
-        worker = scope.launch {
-            for (utt in queue) {
-                processJob = launch { processUtterance(utt) }
-                processJob?.join()
+    private fun ensureWorkers() {
+        if (llmWorker?.isActive != true) {
+            llmWorker = scope.launch {
+                for (job in translateQueue) {
+                    translatePending.decrementAndGet()
+                    processTranslateWithRetry(job)
+                }
+            }
+        }
+        if (asrWorker?.isActive != true) {
+            asrWorker = scope.launch {
+                for (utt in utteranceQueue) {
+                    processAsrWithRetry(utt)
+                }
             }
         }
     }
 
-    private suspend fun processUtterance(utt: UtteranceAudio) {
-        val settings = settingsRepo.settings.first()
+    private fun pipelineBusy(): Boolean =
+        asrInFlight.get() > 0 || llmInFlight.get() > 0 || translatePending.get() > 0
+
+    private fun refreshPhase() {
+        val phase = when {
+            pipelineBusy() -> SessionPhase.Processing
+            audio.isRecording -> SessionPhase.Recording
+            _state.value.phase == SessionPhase.Idle -> SessionPhase.Idle
+            else -> SessionPhase.Paused
+        }
+        _state.update { it.copy(phase = phase) }
+    }
+
+    private suspend fun processAsrWithRetry(utt: UtteranceAudio) {
+        asrInFlight.incrementAndGet()
         _state.update {
             it.copy(
                 phase = SessionPhase.Processing,
                 partialEn = "",
-                partialZh = "",
+                // Keep partialZh if LLM is still streaming the previous sentence.
                 lastCutReason = utt.reason,
                 error = null,
                 canRetry = false
             )
         }
-
         var attempt = 0
         var lastError: Exception? = null
-        while (attempt < 3) {
-            try {
-                runPipeline(utt, settings.contextWindowSize)
-                lastFailed = null
-                return
-            } catch (e: CancellationException) {
-                throw e
-            } catch (e: Exception) {
-                lastError = e
-                attempt++
-                if (attempt >= 3) break
-                delay(500L * attempt * attempt)
+        try {
+            while (attempt < 3) {
+                try {
+                    val settings = settingsRepo.settings.first()
+                    val en = runAsr(utt, settings)
+                    if (en.isBlank()) {
+                        _state.update { cur ->
+                            cur.copy(partialEn = "")
+                        }
+                        return
+                    }
+                    // Keep EN visible while translation runs (or next ASR overwrites it).
+                    _state.update { it.copy(partialEn = en) }
+                    translatePending.incrementAndGet()
+                    translateQueue.send(PendingTranslate(utt, en, settings.contextWindowSize))
+                    lastFailed = null
+                    return
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: RetryableException) {
+                    lastError = e
+                    attempt++
+                    if (attempt >= 3) break
+                    delay(500L * attempt * attempt)
+                } catch (e: Exception) {
+                    // Non-retryable (auth, bad request, empty key, etc.) — fail once.
+                    lastError = e
+                    break
+                }
             }
-        }
-        lastFailed = utt
-        _state.update {
-            it.copy(
-                error = lastError?.message ?: "Processing failed",
-                canRetry = true,
-                phase = if (audio.isRecording) SessionPhase.Recording else SessionPhase.Paused
-            )
+            lastFailed = utt
+            _state.update {
+                it.copy(
+                    error = lastError?.message ?: "ASR failed",
+                    canRetry = true
+                )
+            }
+        } finally {
+            asrInFlight.decrementAndGet()
+            refreshPhase()
         }
     }
 
-    private suspend fun runPipeline(utt: UtteranceAudio, windowSize: Int) {
-        val settings = settingsRepo.settings.first()
+    private suspend fun processTranslateWithRetry(job: PendingTranslate) {
+        llmInFlight.incrementAndGet()
+        _state.update {
+            it.copy(
+                phase = SessionPhase.Processing,
+                partialZh = "",
+                error = null,
+                canRetry = false
+            )
+        }
+        var attempt = 0
+        var lastError: Exception? = null
+        try {
+            while (attempt < 3) {
+                try {
+                    val settings = settingsRepo.settings.first()
+                    runTranslate(job, settings)
+                    lastFailed = null
+                    return
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: RetryableException) {
+                    lastError = e
+                    attempt++
+                    if (attempt >= 3) break
+                    delay(500L * attempt * attempt)
+                } catch (e: Exception) {
+                    // Non-retryable — fail once.
+                    lastError = e
+                    break
+                }
+            }
+            lastFailed = job.utt
+            _state.update {
+                it.copy(
+                    error = lastError?.message ?: "Translation failed",
+                    canRetry = true
+                )
+            }
+        } finally {
+            llmInFlight.decrementAndGet()
+            refreshPhase()
+        }
+    }
+
+    private suspend fun runAsr(utt: UtteranceAudio, settings: UserSettings): String {
         if (settings.asrApiKey.isBlank()) {
             throw Exception("ASR API Key is empty. Configure it in Settings.")
-        }
-        if (settings.llmApiKey.isBlank()) {
-            throw Exception("LLM API Key is empty. Configure it in Settings.")
         }
 
         var en = ""
@@ -304,7 +538,8 @@ class SessionOrchestrator(
                 model = settings.asrModel.trim(),
                 language = settings.inputLanguage.trim(),
                 apiStyle = settings.asrApiStyleEnum(),
-                authStyle = settings.asrAuthStyleEnum()
+                authStyle = settings.asrAuthStyleEnum(),
+                fullUrl = settings.asrFullUrl
             )
         ).collect { ev ->
             when (ev) {
@@ -320,16 +555,32 @@ class SessionOrchestrator(
                 }
             }
         }
-        en = AsrOutputSanitizer.clean(en)
+        return AsrOutputSanitizer.clean(en)
+    }
 
-        if (en.isBlank()) {
-            _state.update {
-                it.copy(
-                    partialEn = "",
-                    phase = if (audio.isRecording) SessionPhase.Recording else SessionPhase.Paused
-                )
-            }
+    private suspend fun runTranslate(job: PendingTranslate, settings: UserSettings) {
+        val en = job.en
+        val sourceLang = settings.inputLanguage.trim()
+        val targetLang = settings.outputLanguage.trim()
+        val model = settings.llmModel.trim()
+        val cacheKey = TranslationCache.Key.of(
+            sourceText = en,
+            sourceLang = sourceLang,
+            targetLang = targetLang,
+            model = model
+        )
+
+        // Cache hit: still run on the serial LLM worker so segment order is unchanged.
+        val cachedZh = cacheKey?.let { translationCache.get(it) }
+        if (cachedZh != null) {
+            android.util.Log.d(TAG, "translation cache hit lang=$sourceLang→$targetLang")
+            _state.update { it.copy(partialZh = cachedZh) }
+            commitTranslation(job, en, cachedZh)
             return
+        }
+
+        if (settings.llmApiKey.isBlank()) {
+            throw Exception("LLM API Key is empty. Configure it in Settings.")
         }
 
         var zh = ""
@@ -340,11 +591,13 @@ class SessionOrchestrator(
             LlmConfig(
                 baseUrl = settings.normalizedLlmBaseUrl(),
                 apiKey = settings.llmApiKey.trim(),
-                model = settings.llmModel.trim(),
-                targetLanguage = settings.outputLanguage.trim(),
-                sourceLanguage = settings.inputLanguage.trim(),
+                model = model,
+                targetLanguage = targetLang,
+                sourceLanguage = sourceLang,
                 systemPrompt = settings.renderLlmSystemPrompt(),
-                authStyle = settings.llmAuthStyleEnum()
+                authStyle = settings.llmAuthStyleEnum(),
+                fullUrl = settings.llmFullUrl,
+                thinking = settings.llmThinkingMode()
             )
         ).collect { ev ->
             when (ev) {
@@ -362,40 +615,117 @@ class SessionOrchestrator(
             }
         }
 
+        // Store only successful non-blank translations under language-aware key
+        if (cacheKey != null && zh.isNotBlank()) {
+            translationCache.put(cacheKey, zh)
+        }
+        commitTranslation(job, en, zh)
+    }
+
+    /**
+     * Append segment + context window + UI state. Always called from the serial
+     * translate worker so cumulative / segments order matches utterance order.
+     */
+    private fun commitTranslation(job: PendingTranslate, en: String, zh: String) {
         val now = System.currentTimeMillis()
-        val offset = if (sessionStartedAt > 0) now - sessionStartedAt else recordedElapsedMs
+        // Cut-time recording offset (pause-excluded). 0 is valid for the first utterance.
+        val offset = job.utt.offsetMs.coerceAtLeast(0L)
         val seg = TranscriptSegment(
             source = en,
             translation = zh,
-            cutReason = utt.reason,
+            cutReason = job.utt.reason,
             incomplete = false,
             timestampMs = now,
             offsetMs = offset
         )
         contextWindow.addLast(ContextTurn(en, zh))
-        while (contextWindow.size > windowSize.coerceAtLeast(0)) {
+        while (contextWindow.size > job.windowSize.coerceAtLeast(0)) {
             contextWindow.removeFirst()
         }
 
+        var turnCount = 0
         _state.update {
+            val segs = it.segments + seg
+            turnCount = segs.size
             it.copy(
                 cumulativeEn = appendBlock(it.cumulativeEn, en),
                 cumulativeZh = appendBlock(it.cumulativeZh, zh),
-                partialEn = "",
+                // Clear EN partial only if it still shows this sentence (no newer ASR).
+                partialEn = if (it.partialEn == en) "" else it.partialEn,
                 partialZh = "",
-                segments = it.segments + seg,
-                phase = when {
-                    audio.isRecording -> SessionPhase.Recording
-                    else -> SessionPhase.Paused
-                },
+                segments = segs,
                 error = null,
                 canRetry = false
             )
         }
+        maybeRequestSessionTitle(turnCount)
+    }
+
+    /**
+     * When dialogue reaches 10 turns, call LLM once to produce a short history title.
+     * Runs off the translate queue so it does not reorder streaming translations.
+     */
+    private fun maybeRequestSessionTitle(turnCount: Int) {
+        if (turnCount < LlmClient.TITLE_TURN_THRESHOLD) return
+        if (!titleRequested.compareAndSet(false, true)) return
+        val segsSnapshot = _state.value.segments.take(LlmClient.TITLE_TURN_THRESHOLD)
+        if (segsSnapshot.isEmpty()) {
+            titleRequested.set(false)
+            return
+        }
+        titleJob = scope.launch {
+            try {
+                val settings = settingsRepo.settings.first()
+                if (settings.llmApiKey.isBlank()) {
+                    android.util.Log.w(TAG, "skip title: empty LLM key")
+                    return@launch
+                }
+                val config = LlmConfig(
+                    baseUrl = settings.normalizedLlmBaseUrl(),
+                    apiKey = settings.llmApiKey.trim(),
+                    model = settings.llmModel.trim(),
+                    targetLanguage = settings.outputLanguage.trim(),
+                    sourceLanguage = settings.inputLanguage.trim(),
+                    systemPrompt = settings.renderLlmSystemPrompt(),
+                    authStyle = settings.llmAuthStyleEnum(),
+                    fullUrl = settings.llmFullUrl,
+                    thinking = settings.llmThinkingMode()
+                )
+                val title = llm.summarizeSessionTitle(segsSnapshot, config)
+                if (title.isNotBlank()) {
+                    sessionTitle = title
+                    _state.update { it.copy(sessionTitle = title) }
+                    android.util.Log.i(TAG, "session title: $title")
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                android.util.Log.w(TAG, "session title failed", e)
+            }
+        }
+    }
+
+    private fun resetTitleState() {
+        titleJob?.cancel()
+        titleJob = null
+        titleRequested.set(false)
+        sessionTitle = null
     }
 
     private fun appendBlock(prev: String, next: String): String =
         if (prev.isEmpty()) next else prev + "\n" + next
 
+    private data class PendingTranslate(
+        val utt: UtteranceAudio,
+        val en: String,
+        val windowSize: Int
+    )
+
     private class RetryableException(cause: Throwable) : Exception(cause.message, cause)
+
+    companion object {
+        private const val TAG = "SessionOrchestrator"
+        /** Max wait for in-flight title LLM when user stops. */
+        private const val TITLE_WAIT_MS = 12_000L
+    }
 }

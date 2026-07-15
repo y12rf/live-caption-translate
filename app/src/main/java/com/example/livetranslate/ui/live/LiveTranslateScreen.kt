@@ -22,11 +22,15 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.History
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.Button
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -44,15 +48,19 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.example.livetranslate.R
+import com.example.livetranslate.data.history.ExportTextMode
 import com.example.livetranslate.data.history.HistoryExport
 import com.example.livetranslate.domain.model.AudioSourceType
 import com.example.livetranslate.domain.model.SessionPhase
 import com.example.livetranslate.service.RecordingService
 import com.example.livetranslate.service.SubtitleOverlayService
+import com.example.livetranslate.util.RecordingShareHelper
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -66,6 +74,15 @@ fun LiveTranslateScreen(
     val enScroll = rememberScrollState()
     val zhScroll = rememberScrollState()
     var pendingStartSource by remember { mutableStateOf(AudioSourceType.Microphone) }
+    var exportMenuOpen by remember { mutableStateOf(false) }
+
+    fun toastExportEmpty() {
+        android.widget.Toast.makeText(
+            context,
+            context.getString(R.string.export_empty),
+            android.widget.Toast.LENGTH_SHORT
+        ).show()
+    }
 
     val projectionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.StartActivityForResult()
@@ -141,14 +158,85 @@ fun LiveTranslateScreen(
                 title = { Text("Live Translate") },
                 actions = {
                     IconButton(onClick = {
-                        val md = viewModel.exportMarkdown() ?: return@IconButton
-                        val send = Intent(Intent.ACTION_SEND).apply {
-                            type = "text/plain"
-                            putExtra(Intent.EXTRA_TEXT, md)
+                        val srt = viewModel.exportSrt(ExportTextMode.Both)
+                        if (srt == null) {
+                            toastExportEmpty()
+                            return@IconButton
                         }
-                        context.startActivity(Intent.createChooser(send, "Export dialogue"))
+                        RecordingShareHelper.shareText(
+                            context,
+                            srt,
+                            chooserTitle = "分享 SRT",
+                            mimeType = "application/x-subrip"
+                        )
                     }) {
-                        Icon(Icons.Default.Share, contentDescription = "Export")
+                        Icon(Icons.Default.Share, contentDescription = "Share SRT")
+                    }
+                    IconButton(onClick = { exportMenuOpen = true }) {
+                        Icon(Icons.Default.MoreVert, contentDescription = "Export")
+                    }
+                    DropdownMenu(
+                        expanded = exportMenuOpen,
+                        onDismissRequest = { exportMenuOpen = false }
+                    ) {
+                        DropdownMenuItem(
+                            text = { Text(stringResource(R.string.export_srt)) },
+                            onClick = {
+                                exportMenuOpen = false
+                                val srt = viewModel.exportSrt(ExportTextMode.Both)
+                                if (srt == null) toastExportEmpty()
+                                else RecordingShareHelper.exportTextToDownloads(
+                                    context, srt, "live_${System.currentTimeMillis()}", "srt"
+                                )
+                            }
+                        )
+                        DropdownMenuItem(
+                            text = { Text(stringResource(R.string.export_srt_zh)) },
+                            onClick = {
+                                exportMenuOpen = false
+                                val srt = viewModel.exportSrt(ExportTextMode.TranslationOnly)
+                                if (srt == null) toastExportEmpty()
+                                else RecordingShareHelper.exportTextToDownloads(
+                                    context, srt, "live_${System.currentTimeMillis()}_zh", "srt"
+                                )
+                            }
+                        )
+                        DropdownMenuItem(
+                            text = { Text(stringResource(R.string.export_srt_en)) },
+                            onClick = {
+                                exportMenuOpen = false
+                                val srt = viewModel.exportSrt(ExportTextMode.SourceOnly)
+                                if (srt == null) toastExportEmpty()
+                                else RecordingShareHelper.exportTextToDownloads(
+                                    context, srt, "live_${System.currentTimeMillis()}_en", "srt"
+                                )
+                            }
+                        )
+                        HorizontalDivider()
+                        DropdownMenuItem(
+                            text = { Text(stringResource(R.string.copy_zh)) },
+                            onClick = {
+                                exportMenuOpen = false
+                                val t = viewModel.exportPlain(ExportTextMode.TranslationOnly)
+                                if (t == null) toastExportEmpty()
+                                else RecordingShareHelper.copyToClipboard(
+                                    context, t, "translation",
+                                    context.getString(R.string.copied_zh)
+                                )
+                            }
+                        )
+                        DropdownMenuItem(
+                            text = { Text(stringResource(R.string.copy_en)) },
+                            onClick = {
+                                exportMenuOpen = false
+                                val t = viewModel.exportPlain(ExportTextMode.SourceOnly)
+                                if (t == null) toastExportEmpty()
+                                else RecordingShareHelper.copyToClipboard(
+                                    context, t, "source",
+                                    context.getString(R.string.copied_en)
+                                )
+                            }
+                        )
                     }
                     IconButton(onClick = onOpenHistory) {
                         Icon(Icons.Default.History, contentDescription = "History")
@@ -168,7 +256,8 @@ fun LiveTranslateScreen(
         ) {
             Text(
                 text = "Phase: ${state.phase.name} · ${HistoryExport.formatOffset(state.recordedElapsedMs)}" +
-                    (state.lastCutReason?.let { " · cut=${it.name}" } ?: ""),
+                    (state.lastCutReason?.let { " · cut=${it.name}" } ?: "") +
+                    (state.sessionTitle?.let { " · $it" } ?: ""),
                 style = MaterialTheme.typography.labelMedium
             )
             Spacer(Modifier.height(8.dp))
@@ -275,7 +364,16 @@ fun LiveTranslateScreen(
                 Button(
                     onClick = {
                         if (state.phase == SessionPhase.Paused) {
-                            RecordingService.start(context, state.audioSource)
+                            // Reuse existing FGS + MediaProjection; never re-run START without token.
+                            try {
+                                RecordingService.resume(context)
+                            } catch (e: Exception) {
+                                android.widget.Toast.makeText(
+                                    context,
+                                    e.message ?: "恢复录音失败",
+                                    android.widget.Toast.LENGTH_LONG
+                                ).show()
+                            }
                         } else {
                             requestStart(state.audioSource)
                         }
@@ -295,9 +393,15 @@ fun LiveTranslateScreen(
                 ) { Text("Pause") }
                 OutlinedButton(
                     onClick = {
+                        // Single entry: service calls controller.stop() once (idempotent).
+                        // Do NOT also call viewModel.stop() — that caused duplicate history rows.
                         RecordingService.stop(context)
-                        viewModel.stop()
                         SubtitleOverlayService.stop(context)
+                        android.widget.Toast.makeText(
+                            context,
+                            context.getString(R.string.session_saved_with_audio),
+                            android.widget.Toast.LENGTH_SHORT
+                        ).show()
                     },
                     enabled = state.phase != SessionPhase.Idle,
                     modifier = Modifier.weight(1f)

@@ -14,7 +14,7 @@ import okhttp3.OkHttpClient
 import java.util.concurrent.TimeUnit
 
 class AppContainer(context: Context) {
-    private val appContext = context.applicationContext
+    val appContext = context.applicationContext
     val appScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
     val settingsRepository = SettingsRepository(appContext)

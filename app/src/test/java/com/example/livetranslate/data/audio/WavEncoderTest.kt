@@ -17,4 +17,12 @@ class WavEncoderTest {
         assertEquals(0, wav[21].toInt() and 0xFF)
         assertEquals(1, wav[22].toInt() and 0xFF)
     }
+
+    @Test
+    fun buildHeader_thenConcat_matchesPcm16MonoToWav() {
+        val pcm = ByteArray(8) { it.toByte() }
+        val a = WavEncoder.pcm16MonoToWav(pcm, 16_000)
+        val b = WavEncoder.buildHeader(pcm.size, 16_000) + pcm
+        assertEquals(a.toList(), b.toList())
+    }
 }

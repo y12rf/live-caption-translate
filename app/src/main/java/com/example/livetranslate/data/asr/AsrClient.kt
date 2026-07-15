@@ -37,7 +37,7 @@ class AsrClient(
             AsrApiStyle.OpenAiTranscriptions -> "/v1/audio/transcriptions"
             AsrApiStyle.ChatCompletionsAudio -> "/v1/chat/completions"
         }
-        val url = ApiUrlResolver.resolve(config.baseUrl, defaultPath)
+        val url = ApiUrlResolver.resolve(config.baseUrl, defaultPath, fullUrl = config.fullUrl)
 
         val request = when (config.apiStyle) {
             AsrApiStyle.OpenAiTranscriptions -> buildTranscriptionsRequest(url, wav, config)

@@ -2,6 +2,7 @@ package com.example.livetranslate.ui.live
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
+import com.example.livetranslate.data.history.ExportTextMode
 import com.example.livetranslate.di.AppContainer
 import com.example.livetranslate.domain.LiveSessionUiState
 import com.example.livetranslate.domain.SessionController
@@ -21,6 +22,10 @@ class LiveTranslateViewModel(
     fun stop() = controller.stop()
     fun retry() = controller.retry()
     fun exportMarkdown(): String? = controller.exportMarkdown()
+    fun exportSrt(mode: ExportTextMode = ExportTextMode.Both): String? =
+        controller.exportSrt(mode)
+
+    fun exportPlain(mode: ExportTextMode): String? = controller.exportPlain(mode)
 
     class Factory(private val container: AppContainer) : ViewModelProvider.Factory {
         @Suppress("UNCHECKED_CAST")

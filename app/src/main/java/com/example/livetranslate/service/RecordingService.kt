@@ -10,10 +10,12 @@ import android.content.Intent
 import android.content.pm.ServiceInfo
 import android.media.projection.MediaProjection
 import android.media.projection.MediaProjectionManager
+import android.net.wifi.WifiManager
 import android.os.Build
 import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
+import android.os.PowerManager
 import android.util.Log
 import androidx.core.app.NotificationCompat
 import com.example.livetranslate.LiveTranslateApp
@@ -22,16 +24,22 @@ import com.example.livetranslate.R
 import com.example.livetranslate.data.history.HistoryExport
 import com.example.livetranslate.domain.model.AudioSourceType
 import com.example.livetranslate.domain.model.SessionPhase
+import com.example.livetranslate.util.KeepAliveHelper
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
-import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
 
 /**
  * Foreground service: keep-alive + notification with duration and Pause / Stop.
+ *
+ * Keep-alive stack:
+ * - FOREGROUND_SERVICE (microphone / mediaProjection) + START_STICKY
+ * - Partial WakeLock while session is active
+ * - High-perf WifiLock for ASR/LLM streaming
+ * - onTaskRemoved does not tear down capture (user can swipe app away)
  *
  * Internal audio path (MediaProjection) is hardened for real devices / Android 14+:
  * - startForeground (mediaProjection type) BEFORE getMediaProjection
@@ -46,6 +54,9 @@ class RecordingService : Service() {
     private val mainHandler = Handler(Looper.getMainLooper())
     /** Ignore initial Idle emissions so we don't release MediaProjection before start(). */
     private var sessionEverNonIdle = false
+
+    private var wakeLock: PowerManager.WakeLock? = null
+    private var wifiLock: WifiManager.WifiLock? = null
 
     private val projectionCallback = object : MediaProjection.Callback() {
         override fun onStop() {
@@ -94,10 +105,25 @@ class RecordingService : Service() {
                 } catch (e: Exception) {
                     Log.e(TAG, "stop failed", e)
                 }
+                releaseKeepAliveLocks()
                 releaseProjection()
                 stopOverlay()
                 stopSelf()
                 return START_NOT_STICKY
+            }
+            ACTION_TOGGLE_OVERLAY_LOCK -> {
+                try {
+                    SubtitleOverlayService.toggleLock(this)
+                } catch (e: Exception) {
+                    Log.w(TAG, "toggle overlay lock failed", e)
+                    OverlayLockState.toggle()
+                }
+                refreshLocalNotification(controller)
+                return START_STICKY
+            }
+            ACTION_REFRESH_NOTIF -> {
+                refreshLocalNotification(controller)
+                return START_STICKY
             }
             ACTION_START, null -> {
                 val source = intent?.getStringExtra(EXTRA_AUDIO_SOURCE)
@@ -109,6 +135,8 @@ class RecordingService : Service() {
                 } catch (e: Exception) {
                     Log.e(TAG, "startRecordingSession failed", e)
                     reportError(controller, e)
+                    releaseKeepAliveLocks()
+                    releaseProjection()
                     stopSelf()
                     return START_NOT_STICKY
                 }
@@ -124,8 +152,13 @@ class RecordingService : Service() {
         controller.setAudioSource(source)
 
         // 1) Foreground first (Android 14 requires this before getMediaProjection)
-        val notif = buildNotification(SessionPhase.Recording, 0L)
+        val notif = buildNotification(
+            SessionPhase.Recording,
+            0L,
+            controller.state.value.overlayEnabled
+        )
         startAsForeground(source, notif)
+        acquireKeepAliveLocks()
 
         // 2) Internal audio: create MediaProjection + register callback
         if (source == AudioSourceType.Internal) {
@@ -170,7 +203,11 @@ class RecordingService : Service() {
             var lastPhase: SessionPhase? = null
             controller.state.collect { st ->
                 try {
-                    val n = buildNotification(st.phase, st.recordedElapsedMs)
+                    val n = buildNotification(
+                        st.phase,
+                        st.recordedElapsedMs,
+                        st.overlayEnabled
+                    )
                     getSystemService(NotificationManager::class.java).notify(NOTIF_ID, n)
                 } catch (e: Exception) {
                     Log.w(TAG, "notify update failed", e)
@@ -186,6 +223,7 @@ class RecordingService : Service() {
                     st.phase == SessionPhase.Idle
                 if (leftSession) {
                     Log.i(TAG, "session ended → release projection & stop service")
+                    releaseKeepAliveLocks()
                     releaseProjection()
                     stopOverlay()
                     stopSelf()
@@ -208,9 +246,34 @@ class RecordingService : Service() {
         } catch (e: Exception) {
             Log.e(TAG, "controller.start failed", e)
             reportError(controller, e)
+            releaseKeepAliveLocks()
             releaseProjection()
             stopSelf()
         }
+    }
+
+    private fun acquireKeepAliveLocks() {
+        if (wakeLock == null) {
+            wakeLock = KeepAliveHelper.newPartialWakeLock(
+                this,
+                "livetranslate:recording"
+            )
+        }
+        // Up to 4h continuous lecture; re-acquire if session still alive via observe loop
+        KeepAliveHelper.safeAcquireWakeLock(wakeLock, timeoutMs = 4 * 60 * 60 * 1000L)
+
+        if (wifiLock == null) {
+            wifiLock = KeepAliveHelper.newWifiLock(this, "livetranslate:streaming")
+        }
+        KeepAliveHelper.safeAcquireWifiLock(wifiLock)
+        Log.i(TAG, "keep-alive locks acquired (wake=${wakeLock?.isHeld} wifi=${wifiLock?.isHeld})")
+    }
+
+    private fun releaseKeepAliveLocks() {
+        KeepAliveHelper.safeReleaseWakeLock(wakeLock)
+        KeepAliveHelper.safeReleaseWifiLock(wifiLock)
+        wakeLock = null
+        wifiLock = null
     }
 
     private fun reportError(
@@ -273,9 +336,21 @@ class RecordingService : Service() {
         }
     }
 
+    /**
+     * User swiped the task from Recents: keep FGS + capture running.
+     * Do not stopSelf here — only explicit Stop / session Idle should tear down.
+     */
+    override fun onTaskRemoved(rootIntent: Intent?) {
+        Log.i(TAG, "onTaskRemoved — keep recording service alive")
+        // Re-assert sticky + wake locks in case the process is under memory pressure
+        acquireKeepAliveLocks()
+        super.onTaskRemoved(rootIntent)
+    }
+
     override fun onDestroy() {
         observeJob?.cancel()
         scope.cancel()
+        releaseKeepAliveLocks()
         releaseProjection()
         super.onDestroy()
     }
@@ -292,7 +367,23 @@ class RecordingService : Service() {
         }
     }
 
-    private fun buildNotification(phase: SessionPhase, elapsedMs: Long): Notification {
+    private fun refreshLocalNotification(
+        controller: com.example.livetranslate.domain.SessionController
+    ) {
+        try {
+            val st = controller.state.value
+            val n = buildNotification(st.phase, st.recordedElapsedMs, st.overlayEnabled)
+            getSystemService(NotificationManager::class.java).notify(NOTIF_ID, n)
+        } catch (e: Exception) {
+            Log.w(TAG, "refresh notification failed", e)
+        }
+    }
+
+    private fun buildNotification(
+        phase: SessionPhase,
+        elapsedMs: Long,
+        overlayEnabled: Boolean = false
+    ): Notification {
         val open = PendingIntent.getActivity(
             this,
             0,
@@ -320,6 +411,12 @@ class RecordingService : Service() {
             Intent(this, RecordingService::class.java).setAction(ACTION_STOP),
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
+        val overlayLock = PendingIntent.getService(
+            this,
+            4,
+            Intent(this, RecordingService::class.java).setAction(ACTION_TOGGLE_OVERLAY_LOCK),
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
 
         val title = when (phase) {
             SessionPhase.Paused -> getString(R.string.notif_paused)
@@ -332,8 +429,13 @@ class RecordingService : Service() {
         } else {
             getString(R.string.notif_pause)
         }
+        val lockLabel = if (OverlayLockState.locked) {
+            getString(R.string.notif_overlay_unlock)
+        } else {
+            getString(R.string.notif_overlay_lock)
+        }
 
-        return NotificationCompat.Builder(this, CHANNEL_ID)
+        val builder = NotificationCompat.Builder(this, CHANNEL_ID)
             .setContentTitle(title)
             .setContentText(getString(R.string.notif_duration, duration))
             .setSmallIcon(android.R.drawable.ic_btn_speak_now)
@@ -344,7 +446,11 @@ class RecordingService : Service() {
             .addAction(0, getString(R.string.notif_stop), stop)
             .setCategory(NotificationCompat.CATEGORY_SERVICE)
             .setForegroundServiceBehavior(NotificationCompat.FOREGROUND_SERVICE_IMMEDIATE)
-            .build()
+
+        if (overlayEnabled) {
+            builder.addAction(0, lockLabel, overlayLock)
+        }
+        return builder.build()
     }
 
     companion object {
@@ -355,7 +461,20 @@ class RecordingService : Service() {
         const val ACTION_PAUSE = "com.example.livetranslate.action.PAUSE"
         const val ACTION_RESUME = "com.example.livetranslate.action.RESUME"
         const val ACTION_STOP = "com.example.livetranslate.action.STOP"
+        const val ACTION_TOGGLE_OVERLAY_LOCK =
+            "com.example.livetranslate.action.TOGGLE_OVERLAY_LOCK"
+        const val ACTION_REFRESH_NOTIF = "com.example.livetranslate.action.REFRESH_NOTIF"
         const val EXTRA_AUDIO_SOURCE = "audio_source"
+
+        /** Best-effort refresh of FGS notification (e.g. after overlay lock toggle). */
+        fun refreshNotification(context: Context) {
+            try {
+                context.startService(
+                    Intent(context, RecordingService::class.java).setAction(ACTION_REFRESH_NOTIF)
+                )
+            } catch (_: Exception) {
+            }
+        }
 
         fun start(
             context: Context,
@@ -395,6 +514,21 @@ class RecordingService : Service() {
                 context.startService(i)
             } catch (e: Exception) {
                 Log.e(TAG, "stop service failed", e)
+            }
+        }
+
+        /**
+         * Resume a paused session without re-requesting MediaProjection.
+         * Must not use [start] for Internal audio after pause — consent Intent is already consumed.
+         */
+        fun resume(context: Context) {
+            val i = Intent(context, RecordingService::class.java).setAction(ACTION_RESUME)
+            try {
+                // Service should already be a foreground service while paused; startService is enough.
+                context.startService(i)
+            } catch (e: Exception) {
+                Log.e(TAG, "resume service failed", e)
+                throw e
             }
         }
     }

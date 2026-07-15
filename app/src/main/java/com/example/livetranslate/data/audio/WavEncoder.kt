@@ -8,13 +8,14 @@ import java.nio.ByteOrder
  * so OpenAI-compatible multipart ASR endpoints accept the upload.
  */
 object WavEncoder {
-    fun pcm16MonoToWav(pcm: ByteArray, sampleRate: Int): ByteArray {
+    const val HEADER_SIZE = 44
+
+    fun buildHeader(dataSize: Int, sampleRate: Int): ByteArray {
         val channels = 1
         val bitsPerSample = 16
         val byteRate = sampleRate * channels * bitsPerSample / 8
         val blockAlign = channels * bitsPerSample / 8
-        val dataSize = pcm.size
-        val buffer = ByteBuffer.allocate(44 + dataSize).order(ByteOrder.LITTLE_ENDIAN)
+        val buffer = ByteBuffer.allocate(HEADER_SIZE).order(ByteOrder.LITTLE_ENDIAN)
         buffer.put("RIFF".toByteArray(Charsets.US_ASCII))
         buffer.putInt(36 + dataSize)
         buffer.put("WAVE".toByteArray(Charsets.US_ASCII))
@@ -28,7 +29,11 @@ object WavEncoder {
         buffer.putShort(bitsPerSample.toShort())
         buffer.put("data".toByteArray(Charsets.US_ASCII))
         buffer.putInt(dataSize)
-        buffer.put(pcm)
         return buffer.array()
+    }
+
+    fun pcm16MonoToWav(pcm: ByteArray, sampleRate: Int): ByteArray {
+        val header = buildHeader(pcm.size, sampleRate)
+        return header + pcm
     }
 }

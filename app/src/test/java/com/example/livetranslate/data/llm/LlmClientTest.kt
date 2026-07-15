@@ -49,6 +49,75 @@ class LlmClientTest {
             assertEquals(listOf("你", "好"), pieces)
             val completed = events.filterIsInstance<LlmStreamEvent.Completed>().single()
             assertEquals("你好", completed.fullText)
+            val body = server.takeRequest().body.readUtf8()
+            assertTrue(!body.contains("\"thinking\""))
+        } finally {
+            server.shutdown()
+        }
+    }
+
+    @Test
+    fun thinkingTrue_sentInBody_andFullUrlUsedAsIs() = runTest {
+        val server = MockWebServer()
+        server.enqueue(
+            MockResponse()
+                .setHeader("Content-Type", "text/event-stream")
+                .setBody("data: {\"choices\":[{\"delta\":{\"content\":\"ok\"}}]}\n\ndata: [DONE]\n\n")
+        )
+        server.start()
+        try {
+            val client = LlmClient(OkHttpClient())
+            val full = server.url("/custom/llm").toString().trimEnd('/')
+            client.translateStream(
+                "hi",
+                emptyList(),
+                LlmConfig(
+                    baseUrl = full,
+                    apiKey = "key",
+                    model = "m",
+                    targetLanguage = "zh",
+                    sourceLanguage = "en",
+                    systemPrompt = "t",
+                    fullUrl = true,
+                    thinking = LlmThinkingMode.True
+                )
+            ).toList()
+            val req = server.takeRequest()
+            assertEquals("/custom/llm", req.path)
+            val body = req.body.readUtf8()
+            assertTrue(body.contains("\"thinking\":true"))
+        } finally {
+            server.shutdown()
+        }
+    }
+
+    @Test
+    fun thinkingFalse_sentInBody() = runTest {
+        val server = MockWebServer()
+        server.enqueue(
+            MockResponse()
+                .setHeader("Content-Type", "text/event-stream")
+                .setBody("data: {\"choices\":[{\"delta\":{\"content\":\"ok\"}}]}\n\ndata: [DONE]\n\n")
+        )
+        server.start()
+        try {
+            val client = LlmClient(OkHttpClient())
+            val base = server.url("/").toString().trimEnd('/')
+            client.translateStream(
+                "hi",
+                emptyList(),
+                LlmConfig(
+                    baseUrl = base,
+                    apiKey = "key",
+                    model = "m",
+                    targetLanguage = "zh",
+                    sourceLanguage = "en",
+                    systemPrompt = "t",
+                    thinking = LlmThinkingMode.False
+                )
+            ).toList()
+            val body = server.takeRequest().body.readUtf8()
+            assertTrue(body.contains("\"thinking\":false"))
         } finally {
             server.shutdown()
         }
