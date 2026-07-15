@@ -46,14 +46,17 @@ gradlew.bat :app:testDebugUnitTest :app:assembleDebug
 
 | 变体 | APK |
 |------|-----|
-| Debug | `app/build/outputs/apk/debug/app-debug.apk` |
-| Release（侧载，当前为 debug 签名） | `app/build/outputs/apk/release/app-release.apk` |
+| Debug · 真机 arm64 | `app/build/outputs/apk/debug/app-arm64-v8a-debug.apk` |
+| Debug · 模拟器 x86 | `app/build/outputs/apk/debug/app-x86-debug.apk` |
+| Release · arm64 | `app/build/outputs/apk/release/app-arm64-v8a-release.apk` |
+| Release · x86 | `app/build/outputs/apk/release/app-x86-release.apk` |
 
 ```bat
 gradlew.bat :app:assembleRelease
 ```
 
 - **minSdk** 26 · **targetSdk** 34 · 包名 `com.example.livetranslate`
+- 按 ABI 分包（`arm64-v8a` / `x86`），不打 universal；含 FFmpeg 时单包约数十 MB 而非百兆
 - Release 默认用 debug keystore，仅适合侧载；上架需自备签名与正式包名
 
 ## 架构

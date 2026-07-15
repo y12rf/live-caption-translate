@@ -16,17 +16,17 @@ android {
         versionCode = 3
         versionName = "1.0.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
-        // Real phones need arm*; include all common ABIs so install does not fail with
-        // "native libraries do not support the device's CPU architecture"
-        ndk {
-            abiFilters += listOf("armeabi-v7a", "arm64-v8a", "x86", "x86_64")
-        }
+        // ABI list lives only in splits.abi (ndk.abiFilters conflicts with splits).
     }
 
-    // Do not produce ABI-split APKs (single universal debug APK for sideload)
+    // Separate APKs per ABI (no fat universal): phone arm64 + emulator x86.
+    // Do not also set defaultConfig.ndk.abiFilters — AGP rejects both together.
     splits {
         abi {
-            isEnable = false
+            isEnable = true
+            reset()
+            include("arm64-v8a", "x86")
+            isUniversalApk = false
         }
     }
 
