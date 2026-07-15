@@ -116,6 +116,47 @@ class HistoryViewModel(
         return path != null && SessionAudioRecorder.fileForPath(path) != null && !reprocess.isBusy
     }
 
+    private val _deletedSessionId = MutableStateFlow<Long?>(null)
+    val deletedSessionId: StateFlow<Long?> = _deletedSessionId.asStateFlow()
+
+    fun clearDeletedSessionId() {
+        _deletedSessionId.value = null
+    }
+
+    /**
+     * Delete current detail session (segments + row; WAV only if unreferenced).
+     * On success emits [deletedSessionId] so UI can navigate back.
+     */
+    fun deleteCurrentSession() {
+        val id = _detail.value?.session?.id ?: return
+        if (reprocess.isBusy &&
+            reprocess.state.value.activeAudioPath == _detail.value?.session?.audioPath
+        ) {
+            return
+        }
+        viewModelScope.launch {
+            releasePlayer()
+            val ok = repo.deleteSession(id)
+            if (ok) {
+                _detail.value = null
+                loadedSessionId = -1L
+                _deletedSessionId.value = id
+            }
+        }
+    }
+
+    /** Delete from list without requiring detail loaded. */
+    fun deleteSession(id: Long) {
+        viewModelScope.launch {
+            if (loadedSessionId == id) {
+                releasePlayer()
+                _detail.value = null
+                loadedSessionId = -1L
+            }
+            repo.deleteSession(id)
+        }
+    }
+
     fun prepareSrt(mode: ExportTextMode = ExportTextMode.Both): String? {
         val d = _detail.value ?: return null
         if (d.segments.isEmpty()) return null

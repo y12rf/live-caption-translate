@@ -17,19 +17,26 @@ object OrphanRecordingDetector {
     )
 
     /**
-     * Orphans newest-first. Skips tiny / unreadable files still listed so user can discard.
+     * Orphans newest-first.
+     *
+     * @param excludePaths extra paths to ignore (e.g. in-progress session WAV, reprocess target)
      */
-    suspend fun findOrphans(context: Context): List<Orphan> {
+    suspend fun findOrphans(
+        context: Context,
+        excludePaths: Set<String> = emptySet()
+    ): List<Orphan> {
         val app = context.applicationContext
         val dir = File(app.filesDir, SessionAudioRecorder.RECORDINGS_DIR)
         if (!dir.isDirectory) return emptyList()
         val keep = CacheCleaner.referencedAudioPaths(app)
+        val excluded = excludePaths.mapNotNull { it.trim().takeIf { p -> p.isNotEmpty() } }.toSet()
         val out = ArrayList<Orphan>()
         dir.listFiles()?.forEach { f ->
             if (!f.isFile) return@forEach
             if (!f.name.endsWith(".wav", ignoreCase = true)) return@forEach
             val path = f.absolutePath
             if (path in keep) return@forEach
+            if (path in excluded) return@forEach
             out.add(
                 Orphan(
                     file = f,

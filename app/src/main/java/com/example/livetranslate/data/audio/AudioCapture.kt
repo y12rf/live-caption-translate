@@ -136,6 +136,15 @@ class AudioCapture(
         sessionRecorder.discard()
     }
 
+    /**
+     * Absolute path of the in-progress session WAV (live recorder or file import),
+     * or null when no session archive is open.
+     */
+    fun activeSessionAudioPath(): String? {
+        importedSessionWavPath?.let { return it }
+        return sessionRecorder.currentFile?.absolutePath
+    }
+
     fun start() {
         if (running) return
         clearError()

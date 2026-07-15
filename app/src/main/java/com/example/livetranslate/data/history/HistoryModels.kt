@@ -77,6 +77,15 @@ interface SessionDao {
     @Query("SELECT COUNT(*) FROM sessions")
     suspend fun sessionCount(): Int
 
+    @Query("SELECT COUNT(*) FROM sessions WHERE audioPath = :path")
+    suspend fun countSessionsWithAudioPath(path: String): Int
+
+    @Query("DELETE FROM segments WHERE sessionId = :sessionId")
+    suspend fun deleteSegmentsForSession(sessionId: Long)
+
+    @Query("DELETE FROM sessions WHERE id = :id")
+    suspend fun deleteSessionById(id: Long)
+
     @Query("DELETE FROM segments")
     suspend fun deleteAllSegments()
 

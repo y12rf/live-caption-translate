@@ -12,6 +12,7 @@ import com.example.livetranslate.data.network.NetworkMonitor
 import com.example.livetranslate.data.settings.SettingsRepository
 import com.example.livetranslate.data.settings.UserSettings
 import com.example.livetranslate.domain.model.AudioSourceType
+import com.example.livetranslate.domain.model.SessionPhase
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
@@ -50,6 +51,15 @@ class SessionController(
     )
 
     val state: StateFlow<LiveSessionUiState> = orchestrator.state
+
+    /** True while a live/file session is active (not Idle). */
+    fun isSessionBusy(): Boolean = state.value.phase != SessionPhase.Idle
+
+    /**
+     * Path of the session WAV currently being written or held by file import.
+     * Used to exclude in-progress recordings from orphan recovery prompts.
+     */
+    fun activeSessionAudioPath(): String? = audio.activeSessionAudioPath()
 
     fun updateCachedSettings(s: UserSettings) {
         latestSettings = s

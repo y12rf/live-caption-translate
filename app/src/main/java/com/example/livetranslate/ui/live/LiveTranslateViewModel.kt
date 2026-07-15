@@ -14,6 +14,7 @@ import com.example.livetranslate.domain.ReprocessTitle
 import com.example.livetranslate.domain.ReprocessUiState
 import com.example.livetranslate.domain.SessionController
 import com.example.livetranslate.domain.model.AudioSourceType
+import com.example.livetranslate.domain.model.SessionPhase
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -56,15 +57,38 @@ class LiveTranslateViewModel(
 
     fun exportPlain(mode: ExportTextMode): String? = controller.exportPlain(mode)
 
-    /** Call on Live screen resume / first composition. */
+    /**
+     * Call on Live screen resume / first composition.
+     * Skips prompts while a live session is running, and excludes the in-progress
+     * session WAV (+ reprocess target) so continuous recordings are not mistaken
+     * for interrupted orphan tasks.
+     */
     fun checkOrphans() {
         viewModelScope.launch {
-            val orphans = OrphanRecordingDetector.findOrphans(getApplication())
-            val next = orphans.firstOrNull { it.path !in laterSkip } ?: run {
+            // Do not interrupt an active live/file session with recovery UI.
+            if (controller.isSessionBusy() ||
+                controller.state.value.phase != SessionPhase.Idle
+            ) {
                 _orphanPrompt.value = null
                 return@launch
             }
-            // Prefer playable; still show damaged so user can discard
+            if (reprocess.isBusy) {
+                _orphanPrompt.value = null
+                return@launch
+            }
+            val exclude = buildSet {
+                controller.activeSessionAudioPath()?.let { add(it) }
+                reprocess.state.value.activeAudioPath?.let { add(it) }
+            }
+            val orphans = OrphanRecordingDetector.findOrphans(
+                context = getApplication(),
+                excludePaths = exclude
+            )
+            val next = orphans.firstOrNull { it.path !in laterSkip && it.path !in exclude }
+                ?: run {
+                    _orphanPrompt.value = null
+                    return@launch
+                }
             _orphanPrompt.value = OrphanPrompt(
                 path = next.path,
                 label = next.file.name

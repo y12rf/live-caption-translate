@@ -71,6 +71,32 @@ fun HistoryScreen(
     val sessions by viewModel.sessions.collectAsStateWithLifecycle()
     val query by viewModel.listQuery.collectAsStateWithLifecycle()
     val fmt = SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.getDefault())
+    var listMenuSessionId by remember { mutableStateOf<Long?>(null) }
+    var listDeleteId by remember { mutableStateOf<Long?>(null) }
+
+    if (listDeleteId != null) {
+        AlertDialog(
+            onDismissRequest = { listDeleteId = null },
+            title = { Text(stringResource(R.string.history_delete_confirm_title)) },
+            text = { Text(stringResource(R.string.history_delete_confirm_body)) },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        val id = listDeleteId
+                        listDeleteId = null
+                        if (id != null) viewModel.deleteSession(id)
+                    }
+                ) {
+                    Text(stringResource(R.string.history_delete))
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { listDeleteId = null }) {
+                    Text(stringResource(R.string.cancel))
+                }
+            }
+        )
+    }
 
     Scaffold(
         topBar = {
@@ -139,6 +165,26 @@ fun HistoryScreen(
                                         }
                                     )
                                 },
+                                trailingContent = {
+                                    IconButton(onClick = { listMenuSessionId = s.id }) {
+                                        Icon(
+                                            Icons.Default.MoreVert,
+                                            contentDescription = stringResource(R.string.history_delete)
+                                        )
+                                    }
+                                    DropdownMenu(
+                                        expanded = listMenuSessionId == s.id,
+                                        onDismissRequest = { listMenuSessionId = null }
+                                    ) {
+                                        DropdownMenuItem(
+                                            text = { Text(stringResource(R.string.history_delete)) },
+                                            onClick = {
+                                                listMenuSessionId = null
+                                                listDeleteId = s.id
+                                            }
+                                        )
+                                    }
+                                },
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .clickable { onOpenDetail(s.id) }
@@ -165,9 +211,11 @@ fun HistoryDetailScreen(
     val filtered by viewModel.filteredSegments.collectAsStateWithLifecycle()
     val playback by viewModel.playback.collectAsStateWithLifecycle()
     val reprocess by viewModel.reprocessState.collectAsStateWithLifecycle()
+    val deletedId by viewModel.deletedSessionId.collectAsStateWithLifecycle()
     val context = LocalContext.current
     val wallFmt = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault())
     var menuOpen by remember { mutableStateOf(false) }
+    var deleteConfirmOpen by remember { mutableStateOf(false) }
     val listState = rememberLazyListState()
 
     LaunchedEffect(sessionId) {
@@ -187,6 +235,41 @@ fun HistoryDetailScreen(
             android.widget.Toast.LENGTH_SHORT
         ).show()
         onOpenSession(id)
+    }
+
+    LaunchedEffect(deletedId) {
+        if (deletedId != null) {
+            viewModel.clearDeletedSessionId()
+            android.widget.Toast.makeText(
+                context,
+                context.getString(R.string.history_deleted),
+                android.widget.Toast.LENGTH_SHORT
+            ).show()
+            onBack()
+        }
+    }
+
+    if (deleteConfirmOpen) {
+        AlertDialog(
+            onDismissRequest = { deleteConfirmOpen = false },
+            title = { Text(stringResource(R.string.history_delete_confirm_title)) },
+            text = { Text(stringResource(R.string.history_delete_confirm_body)) },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        deleteConfirmOpen = false
+                        viewModel.deleteCurrentSession()
+                    }
+                ) {
+                    Text(stringResource(R.string.history_delete))
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { deleteConfirmOpen = false }) {
+                    Text(stringResource(R.string.cancel))
+                }
+            }
+        )
     }
 
     fun toastEmpty() {
@@ -281,6 +364,14 @@ fun HistoryDetailScreen(
                                 }
                             )
                         }
+                        DropdownMenuItem(
+                            text = { Text(stringResource(R.string.history_delete)) },
+                            onClick = {
+                                menuOpen = false
+                                deleteConfirmOpen = true
+                            },
+                            enabled = reprocess.phase == ReprocessPhase.Idle
+                        )
                         HorizontalDivider()
                         DropdownMenuItem(
                             text = { Text(stringResource(R.string.export_srt)) },

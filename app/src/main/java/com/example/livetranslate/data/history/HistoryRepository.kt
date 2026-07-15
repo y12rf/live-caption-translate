@@ -37,6 +37,27 @@ class HistoryRepository(context: Context) {
         return SessionDetail(session, segments)
     }
 
+    /**
+     * Delete one history session and its segments.
+     * WAV file is removed only when no other session still references the same path
+     * (e.g. shared by `Re` reprocess sessions).
+     *
+     * @return true if a session row was deleted
+     */
+    suspend fun deleteSession(id: Long): Boolean {
+        val session = dao.getSession(id) ?: return false
+        val path = session.audioPath?.trim()?.takeIf { it.isNotEmpty() }
+        dao.deleteSegmentsForSession(id)
+        dao.deleteSessionById(id)
+        if (path != null) {
+            val remaining = dao.countSessionsWithAudioPath(path)
+            if (remaining == 0) {
+                runCatching { File(path).delete() }
+            }
+        }
+        return true
+    }
+
     fun formatMarkdown(detail: SessionDetail): String = HistoryExport.formatMarkdown(detail)
 
     fun audioFileFor(detail: SessionDetail): File? =

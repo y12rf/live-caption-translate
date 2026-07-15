@@ -80,4 +80,8 @@
     <string name="glossary_add">添加术语</string>
     <string name="glossary_insert_placeholder">插入 {{glossary}}</string>
     <string name="glossary_empty_hint">空术语表时 {{glossary}} 渲染为空</string>
+    <string name="history_delete">删除记录</string>
+    <string name="history_delete_confirm_title">删除此会话？</string>
+    <string name="history_delete_confirm_body">将删除文稿记录。若无其他会话共用该录音，录音文件也会一并删除。此操作不可撤销。</string>
+    <string name="history_deleted">已删除</string>
 </resources>
