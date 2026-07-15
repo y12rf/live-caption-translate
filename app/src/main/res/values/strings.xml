@@ -1,6 +1,32 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">Live Translate</string>
+
+    <!-- Common -->
+    <string name="ok">OK</string>
+    <string name="confirm">OK</string>
+    <string name="cancel">Cancel</string>
+    <string name="back">Back</string>
+    <string name="save">Save</string>
+    <string name="delete">Delete</string>
+    <string name="loading">Loading…</string>
+    <string name="more">More</string>
+    <string name="share">Share</string>
+    <string name="settings">Settings</string>
+    <string name="history">History</string>
+    <string name="start">Start</string>
+    <string name="resume">Resume</string>
+    <string name="pause">Pause</string>
+    <string name="stop">Stop</string>
+
+    <!-- App language -->
+    <string name="ui_language_section">App language</string>
+    <string name="ui_language">Interface language</string>
+    <string name="ui_language_en">English</string>
+    <string name="ui_language_zh">中文</string>
+    <string name="ui_language_info">Changes the app interface language. Translation input/output languages are set separately below.</string>
+
+    <!-- Notifications -->
     <string name="notif_channel_recording">Recording</string>
     <string name="notif_channel_recording_desc">Shows live translate recording status and duration</string>
     <string name="notif_recording">Translating…</string>
@@ -12,76 +38,203 @@
     <string name="notif_stop">Stop &amp; save</string>
     <string name="notif_overlay_unlock">Unlock overlay</string>
     <string name="notif_overlay_lock">Lock overlay</string>
-    <string name="keepalive_section">保活 / 电池</string>
-    <string name="keepalive_battery_ok">已忽略电池优化</string>
-    <string name="keepalive_battery_need">未忽略电池优化（后台易被杀）</string>
-    <string name="keepalive_request_battery">忽略电池优化</string>
-    <string name="keepalive_open_battery_list">打开电池优化列表</string>
-    <string name="keepalive_oem_autostart">厂商自启动 / 后台运行</string>
-    <string name="keepalive_app_details">应用详情设置</string>
-    <string name="history_has_audio">含录音</string>
-    <string name="export_srt">导出 SRT（双语）</string>
-    <string name="export_srt_zh">导出 SRT（仅译文）</string>
-    <string name="export_srt_en">导出 SRT（仅原文）</string>
-    <string name="copy_zh">复制译文</string>
-    <string name="copy_en">复制原文</string>
-    <string name="export_empty">没有可导出的文稿</string>
-    <string name="export_audio">导出录音</string>
-    <string name="share_audio">分享录音</string>
-    <string name="no_audio">本场无录音文件</string>
-    <string name="copied_zh">译文已复制</string>
-    <string name="copied_en">原文已复制</string>
-    <string name="session_saved_with_audio">会话与录音已自动保存</string>
-    <string name="overlay_translation_on_top">译文在上 / 原文在下</string>
-    <string name="cache_section">缓存与数据</string>
-    <string name="clear_cache">清除缓存</string>
-    <string name="clear_all_history">清除全部历史与录音</string>
-    <string name="clear_all_history_confirm">将删除所有历史会话、文稿和录音文件，且不可恢复。确定？</string>
-    <string name="cache_busy">清理中…</string>
-    <string name="confirm">确定</string>
-    <string name="cancel">取消</string>
-    <string name="history_search_hint">搜索标题 / 原文 / 译文</string>
-    <string name="history_search_empty">无匹配会话</string>
-    <string name="detail_search_hint">在本场搜索原文 / 译文</string>
-    <string name="detail_search_empty">无匹配段落</string>
-    <string name="net_offline">离线 — 继续录音，恢复网络后自动补传</string>
-    <string name="net_backlog">队列 ASR %1$d · 译 %2$d · 磁盘 %3$d</string>
-    <string name="net_failed">失败 %1$d 句 — %2$s</string>
-    <string name="retry_one">重试 1 句</string>
-    <string name="retry_all">全部重试</string>
-    <string name="dismiss_fail">忽略失败</string>
-    <string name="retry_save">重试保存</string>
-    <string name="stop_title">结束会话</string>
-    <string name="stop_message">队列中还有未处理句子时，可等待补全（弱网推荐）或立即结束。</string>
-    <string name="stop_drain">等待完成并保存</string>
-    <string name="stop_now">立即结束</string>
-    <string name="session_draining">正在排空队列并保存…</string>
-    <string name="dropped_utt">已丢弃 %1$d 句</string>
-    <string name="source_file">文件</string>
-    <string name="start_file">选择文件</string>
-    <string name="file_pick_cancelled">未选择文件</string>
-    <string name="file_import_started">开始导入（分块识别 + 标点切句）…</string>
-    <string name="reprocess_menu">重新识别翻译</string>
-    <string name="reprocess_cancel">取消重跑</string>
-    <string name="reprocess_running">正在事后识别翻译…</string>
-    <string name="reprocess_saved">新会话已保存</string>
-    <string name="reprocess_error_title">重跑失败</string>
-    <string name="history_tap_segment_hint">点按句子可跳转录音位置</string>
-    <string name="playback_play">播放</string>
-    <string name="playback_pause">暂停</string>
-    <string name="orphan_title">发现未保存录音</string>
-    <string name="orphan_message">检测到未关联历史的录音文件（可能因杀后台导致会话未入库）。可事后识别翻译、丢弃，或稍后处理。</string>
-    <string name="orphan_reprocess">事后识别</string>
-    <string name="orphan_discard">丢弃</string>
-    <string name="orphan_later">稍后</string>
-    <string name="glossary_section">术语表</string>
-    <string name="glossary_source">源语术语</string>
-    <string name="glossary_target">译语</string>
-    <string name="glossary_add">添加术语</string>
-    <string name="glossary_insert_placeholder">插入 {{glossary}}</string>
-    <string name="glossary_empty_hint">空术语表时 {{glossary}} 渲染为空</string>
-    <string name="history_delete">删除记录</string>
-    <string name="history_delete_confirm_title">删除此会话？</string>
-    <string name="history_delete_confirm_body">将删除文稿记录。若无其他会话共用该录音，录音文件也会一并删除。此操作不可撤销。</string>
-    <string name="history_deleted">已删除</string>
+
+    <!-- Keep-alive -->
+    <string name="keepalive_section">Keep-alive / battery</string>
+    <string name="keepalive_battery_ok">Battery optimization ignored</string>
+    <string name="keepalive_battery_need">Battery optimization not ignored (easy to kill in background)</string>
+    <string name="keepalive_request_battery">Ignore battery optimization</string>
+    <string name="keepalive_open_battery_list">Open battery optimization list</string>
+    <string name="keepalive_oem_autostart">OEM autostart / background</string>
+    <string name="keepalive_app_details">App details</string>
+    <string name="keepalive_info">Long sessions need ignore-battery and OEM background allowlists on some phones.</string>
+    <string name="keepalive_oem_toast">Opened vendor settings if available; otherwise app details.</string>
+
+    <!-- History / export -->
+    <string name="history_has_audio">Has audio</string>
+    <string name="history_empty">No sessions yet</string>
+    <string name="history_search_hint">Search title / source / translation</string>
+    <string name="history_search_empty">No matching sessions</string>
+    <string name="detail_search_hint">Search source / translation in this session</string>
+    <string name="detail_search_empty">No matching segments</string>
+    <string name="history_no_segments">(No transcript segments — audio only)</string>
+    <string name="export_srt">Export SRT (bilingual)</string>
+    <string name="export_srt_zh">Export SRT (translation only)</string>
+    <string name="export_srt_en">Export SRT (source only)</string>
+    <string name="copy_zh">Copy translation</string>
+    <string name="copy_en">Copy source</string>
+    <string name="export_empty">Nothing to export</string>
+    <string name="export_audio">Export audio</string>
+    <string name="share_audio">Share audio</string>
+    <string name="share_srt">Share SRT</string>
+    <string name="no_audio">No recording for this session</string>
+    <string name="copied_zh">Translation copied</string>
+    <string name="copied_en">Source copied</string>
+    <string name="session_saved_with_audio">Session and audio saved</string>
+    <string name="history_delete">Delete session</string>
+    <string name="history_delete_confirm_title">Delete this session?</string>
+    <string name="history_delete_confirm_body">Transcript will be deleted. The audio file is removed only if no other session shares it. This cannot be undone.</string>
+    <string name="history_deleted">Deleted</string>
+    <string name="history_tap_segment_hint">Tap a sentence to jump in the recording</string>
+    <string name="label_source">EN</string>
+    <string name="label_translation">ZH</string>
+    <string name="segment_incomplete">(incomplete)</string>
+    <string name="session_title_prefix">Title: %1$s</string>
+
+    <!-- Playback -->
+    <string name="playback_play">Play</string>
+    <string name="playback_pause">Pause</string>
+
+    <!-- Cache -->
+    <string name="cache_section">Cache &amp; data</string>
+    <string name="clear_cache">Clear cache</string>
+    <string name="clear_all_history">Clear all history &amp; recordings</string>
+    <string name="clear_all_history_confirm">This permanently deletes all history sessions, transcripts, and recording files. Continue?</string>
+    <string name="cache_busy">Cleaning…</string>
+    <string name="cache_info">Clear cache removes orphan WAVs and in-memory translation cache. Full clear also wipes history.</string>
+    <string name="cache_summary_translation">Translation cache cleared</string>
+    <string name="cache_summary_orphans">Orphan recordings: %1$d (%2$s)</string>
+    <string name="cache_summary_history">History sessions: %1$d (%2$s)</string>
+    <string name="cache_summary_empty">Nothing to clean</string>
+    <string name="cache_summary_sep">; </string>
+
+    <!-- Network / weak net -->
+    <string name="net_offline">Offline — keep recording; upload resumes when online</string>
+    <string name="net_backlog">Queue ASR %1$d · translate %2$d · disk %3$d</string>
+    <string name="net_failed">Failed %1$d utterance(s) — %2$s</string>
+    <string name="retry_one">Retry 1</string>
+    <string name="retry_all">Retry all</string>
+    <string name="dismiss_fail">Dismiss failures</string>
+    <string name="retry_save">Retry save</string>
+    <string name="stop_title">End session</string>
+    <string name="stop_message">If the queue still has work, you can wait to finish (recommended on weak network) or end now.</string>
+    <string name="stop_drain">Wait and save</string>
+    <string name="stop_now">End now</string>
+    <string name="session_draining">Draining queue and saving…</string>
+    <string name="dropped_utt">Dropped %1$d utterance(s)</string>
+    <string name="stop_pending_extra">\n\nAbout %1$d item(s) still queued.</string>
+
+    <!-- Live screen -->
+    <string name="live_title">Live Translate</string>
+    <string name="source_label">Source</string>
+    <string name="source_mic">Mic</string>
+    <string name="source_internal">Internal</string>
+    <string name="source_file">File</string>
+    <string name="start_file">Select</string>
+    <string name="file_pick_cancelled">No file selected</string>
+    <string name="file_import_started">Importing (chunked ASR + punctuation split)…</string>
+    <string name="overlay_enable">Floating bilingual captions</string>
+    <string name="overlay_translation_on_top">Translation on top / source below</string>
+    <string name="live_panel_source">Source (EN)</string>
+    <string name="live_panel_translation">Translation (ZH)</string>
+    <string name="phase_line">Phase: %1$s · %2$s</string>
+    <string name="projection_denied">Screen capture / internal audio not granted</string>
+    <string name="resume_failed">Failed to resume recording</string>
+    <string name="overlay_permission_need">Please allow display over other apps for floating captions</string>
+    <string name="recording_start_failed">Failed to start recording</string>
+
+    <!-- Reprocess / offline -->
+    <string name="reprocess_menu">Re-run ASR &amp; translate</string>
+    <string name="reprocess_cancel">Cancel</string>
+    <string name="reprocess_running">Re-running ASR &amp; translate…</string>
+    <string name="reprocess_saved">New session saved</string>
+    <string name="reprocess_saved_id">New session saved (#%1$d)</string>
+    <string name="reprocess_error_title">Reprocess failed</string>
+    <string name="reprocess_busy_live">Finish the live session before reprocessing</string>
+    <string name="reprocess_busy_import">Finish the live session before importing a file</string>
+    <string name="reprocess_bad_audio">Recording file is missing or corrupt</string>
+    <string name="reprocess_cancelled">Reprocess cancelled</string>
+    <string name="import_cancelled">File import cancelled</string>
+    <string name="import_failed">File import failed</string>
+    <string name="reprocess_failed">Reprocess failed</string>
+    <string name="offline_offline">You are offline</string>
+    <string name="offline_copying">Copying file…</string>
+    <string name="offline_ffmpeg">FFmpeg converting…</string>
+    <string name="offline_ffmpeg_pct">FFmpeg converting %1$d%%</string>
+    <string name="offline_install_wav">Installing session audio…</string>
+    <string name="offline_read_audio">Reading audio…</string>
+    <string name="offline_asr_progress">Recognizing %1$d/%2$d</string>
+    <string name="offline_translate_progress">Translating %1$d/%2$d</string>
+    <string name="offline_saving">Saving session…</string>
+    <string name="offline_saved">Saved: %1$s</string>
+    <string name="offline_title_gen">Generating session title…</string>
+    <string name="offline_no_pcm">Recording has no valid audio data</string>
+    <string name="offline_asr_empty">ASR produced no text</string>
+    <string name="offline_split_empty">No sentences after punctuation split</string>
+    <string name="offline_read_fail">Cannot read recording: %1$s</string>
+    <string name="offline_asr_fail">ASR failed (chunk %1$d/%2$d): %3$s</string>
+    <string name="offline_translate_fail">Translation failed: “%1$s” %2$s</string>
+    <string name="offline_empty_translation">Empty translation</string>
+    <string name="offline_file_title_fallback">File import</string>
+    <string name="offline_cancelling">Cancelling…</string>
+    <string name="asr_key_empty">ASR API key is empty. Configure it in Settings.</string>
+    <string name="llm_key_empty">LLM API key is empty. Configure it in Settings.</string>
+    <string name="import_uri_fail">Cannot read the selected file</string>
+    <string name="import_file_too_small">File too small or copy failed</string>
+    <string name="import_wav_fail">Failed to write session WAV</string>
+
+    <!-- Orphan recovery -->
+    <string name="orphan_title">Unsaved recording found</string>
+    <string name="orphan_message">A recording is not linked to history (process may have been killed). You can re-run ASR &amp; translate, discard it, or later.</string>
+    <string name="orphan_reprocess">Re-run now</string>
+    <string name="orphan_discard">Discard</string>
+    <string name="orphan_later">Later</string>
+
+    <!-- Glossary -->
+    <string name="glossary_section">Glossary</string>
+    <string name="glossary_source">Source term</string>
+    <string name="glossary_target">Translation</string>
+    <string name="glossary_add">Add term</string>
+    <string name="glossary_remove">Remove</string>
+    <string name="glossary_insert_placeholder">Insert {{glossary}}</string>
+    <string name="glossary_empty_hint">When empty, {{glossary}} renders as blank</string>
+    <string name="glossary_info">Global source→target pairs injected via {{glossary}} into the LLM system prompt.\nWhen empty, {{glossary}} is blank.\nMax 100 entries.</string>
+
+    <!-- Settings sections / fields -->
+    <string name="settings_asr">ASR</string>
+    <string name="settings_llm">LLM</string>
+    <string name="settings_languages">Languages (translate)</string>
+    <string name="settings_vad">VAD / chunking</string>
+    <string name="settings_overlay">Floating overlay</string>
+    <string name="settings_api_url">API URL</string>
+    <string name="settings_api_key">API key</string>
+    <string name="settings_model">Model</string>
+    <string name="settings_full_url">Full URL (no path append)</string>
+    <string name="settings_asr_style">ASR style</string>
+    <string name="settings_auth_style">Auth style</string>
+    <string name="settings_thinking">Thinking field</string>
+    <string name="settings_system_prompt">Translation system prompt</string>
+    <string name="settings_reset_prompt">Reset prompt to default</string>
+    <string name="settings_input_lang">Input language</string>
+    <string name="settings_output_lang">Output language</string>
+    <string name="settings_silence_ms">Silence ms</string>
+    <string name="settings_max_utt_ms">Max utterance ms</string>
+    <string name="settings_min_utt_ms">Min utterance ms</string>
+    <string name="settings_energy">Energy threshold</string>
+    <string name="settings_context_n">Context window N</string>
+    <string name="settings_overlay_w">Overlay max width (dp)</string>
+    <string name="settings_overlay_h">Overlay max height (dp)</string>
+    <string name="settings_overlay_alpha">Background opacity %</string>
+    <string name="settings_overlay_bg">Background color</string>
+    <string name="settings_overlay_en_color">Source text color</string>
+    <string name="settings_overlay_zh_color">Translation text color</string>
+    <string name="settings_reset_overlay_colors">Reset overlay colors</string>
+    <string name="settings_test_asr">Test ASR latency</string>
+    <string name="settings_test_llm">Test LLM latency</string>
+    <string name="settings_testing_asr">Testing ASR…</string>
+    <string name="settings_testing_llm">Testing LLM…</string>
+    <string name="settings_info_asr_url">Default: if a path already exists after /v1/, use as-is; otherwise append:\n• OpenAiTranscriptions → /v1/audio/transcriptions\n• ChatCompletionsAudio → /v1/chat/completions\n\nWith “Full URL” on: no path is appended.</string>
+    <string name="settings_info_full_url">When on, the API URL is used exactly as typed (no /v1/… append).</string>
+    <string name="settings_info_system_prompt">System prompt for translation. Placeholders:\n• {{to}} — output language\n• {{from}} — input language\n• {{glossary}} — glossary block (only if present in the prompt)</string>
+    <string name="settings_info_vad">Energy VAD parameters:\n• Silence ms — end-of-utterance silence\n• Max utterance ms — force cut length\n• Min utterance ms — drop short clips\n• Energy threshold — speech energy\n• Context window N — LLM history turns</string>
+    <string name="settings_info_overlay">Floating caption size, colors, and stack order over other apps.</string>
+    <string name="settings_prompt_title">System prompt</string>
+    <string name="settings_full_url_title">Full URL</string>
+
+    <!-- Share helper -->
+    <string name="share_content_empty">Content is empty</string>
+    <string name="share_export_ok">Exported to Downloads: %1$s</string>
+    <string name="share_export_fail">Export failed: %1$s</string>
+    <string name="share_audio_missing">Recording file not found</string>
+    <string name="share_audio_export_fail">Audio export failed: %1$s</string>
 </resources>

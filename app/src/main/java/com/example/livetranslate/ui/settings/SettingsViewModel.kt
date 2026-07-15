@@ -117,7 +117,7 @@ class SettingsViewModel(
                 CacheCleaner.clearOrphanRecordings(getApplication())
             }.copy(translationCacheCleared = true)
             _ui.update {
-                it.copy(cacheBusy = false, cacheMessage = r.summaryZh())
+                it.copy(cacheBusy = false, cacheMessage = r.summary(getApplication()))
             }
         }
     }
@@ -132,7 +132,7 @@ class SettingsViewModel(
                 CacheCleaner.clearAllHistoryAndRecordings(getApplication())
             }.copy(translationCacheCleared = true)
             _ui.update {
-                it.copy(cacheBusy = false, cacheMessage = r.summaryZh())
+                it.copy(cacheBusy = false, cacheMessage = r.summary(getApplication()))
             }
         }
     }

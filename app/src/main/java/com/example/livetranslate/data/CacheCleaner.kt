@@ -21,17 +21,53 @@ object CacheCleaner {
     ) {
         val totalBytesFreed: Long get() = orphanBytesFreed + historyBytesFreed
 
-        fun summaryZh(): String = buildString {
-            if (translationCacheCleared) append("翻译缓存已清空")
-            if (orphanFilesDeleted > 0) {
-                if (isNotEmpty()) append("；")
-                append("孤立录音 ${orphanFilesDeleted} 个（${formatBytes(orphanBytesFreed)}）")
+        fun summaryZh(): String = summary(null)
+
+        /** Localized summary; pass [context] for string resources. */
+        fun summary(context: android.content.Context?): String {
+            if (context == null) {
+                return buildString {
+                    if (translationCacheCleared) append("Translation cache cleared")
+                    if (orphanFilesDeleted > 0) {
+                        if (isNotEmpty()) append("; ")
+                        append("Orphan recordings: $orphanFilesDeleted (${formatBytes(orphanBytesFreed)})")
+                    }
+                    if (historySessionsDeleted > 0) {
+                        if (isNotEmpty()) append("; ")
+                        append("History: $historySessionsDeleted (${formatBytes(historyBytesFreed)})")
+                    }
+                    if (isEmpty()) append("Nothing to clean")
+                }
             }
-            if (historySessionsDeleted > 0) {
-                if (isNotEmpty()) append("；")
-                append("历史 ${historySessionsDeleted} 场（${formatBytes(historyBytesFreed)}）")
+            return buildString {
+                val sep = context.getString(com.example.livetranslate.R.string.cache_summary_sep)
+                if (translationCacheCleared) {
+                    append(context.getString(com.example.livetranslate.R.string.cache_summary_translation))
+                }
+                if (orphanFilesDeleted > 0) {
+                    if (isNotEmpty()) append(sep)
+                    append(
+                        context.getString(
+                            com.example.livetranslate.R.string.cache_summary_orphans,
+                            orphanFilesDeleted,
+                            formatBytes(orphanBytesFreed)
+                        )
+                    )
+                }
+                if (historySessionsDeleted > 0) {
+                    if (isNotEmpty()) append(sep)
+                    append(
+                        context.getString(
+                            com.example.livetranslate.R.string.cache_summary_history,
+                            historySessionsDeleted,
+                            formatBytes(historyBytesFreed)
+                        )
+                    )
+                }
+                if (isEmpty()) {
+                    append(context.getString(com.example.livetranslate.R.string.cache_summary_empty))
+                }
             }
-            if (isEmpty()) append("没有可清理的内容")
         }
     }
 

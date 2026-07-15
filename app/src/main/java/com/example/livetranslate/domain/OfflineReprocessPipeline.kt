@@ -2,6 +2,7 @@ package com.example.livetranslate.domain
 
 import android.content.Context
 import android.net.Uri
+import com.example.livetranslate.R
 import com.example.livetranslate.data.asr.AsrClient
 import com.example.livetranslate.data.asr.AsrConfig
 import com.example.livetranslate.data.asr.AsrOutputSanitizer
@@ -97,6 +98,10 @@ class OfflineReprocessPipeline(
         get() = _state.value.phase == ReprocessPhase.Running ||
             _state.value.phase == ReprocessPhase.Cancelling
 
+    private fun str(resId: Int): String = appContext.getString(resId)
+
+    private fun str(resId: Int, vararg args: Any): String = appContext.getString(resId, *args)
+
     /**
      * History re-run or orphan recovery on an existing WAV.
      * Title: [OfflineTitlePolicy.RePrefix].
@@ -117,7 +122,7 @@ class OfflineReprocessPipeline(
         if (isBusy) return
         if (isLiveSessionBusy()) {
             _state.update {
-                it.copy(error = "请先结束当前实时会话，再导入文件")
+                it.copy(error = str(R.string.reprocess_busy_import))
             }
             return
         }
@@ -129,14 +134,14 @@ class OfflineReprocessPipeline(
             } catch (e: CancellationException) {
                 _state.value = ReprocessUiState(
                     phase = ReprocessPhase.Idle,
-                    error = "已取消文件导入"
+                    error = str(R.string.import_cancelled)
                 )
                 throw e
             } catch (e: Exception) {
                 android.util.Log.e(TAG, "startFromUri failed", e)
                 _state.value = ReprocessUiState(
                     phase = ReprocessPhase.Idle,
-                    error = e.message ?: "文件导入失败"
+                    error = e.message ?: str(R.string.import_failed)
                 )
             }
         }
@@ -146,7 +151,7 @@ class OfflineReprocessPipeline(
         if (!isBusy) return
         cancelRequested.set(true)
         _state.update {
-            it.copy(phase = ReprocessPhase.Cancelling, message = "正在取消…")
+            it.copy(phase = ReprocessPhase.Cancelling, message = str(R.string.offline_cancelling))
         }
         job?.cancel()
     }
@@ -167,13 +172,13 @@ class OfflineReprocessPipeline(
         if (isBusy) return
         if (isLiveSessionBusy()) {
             _state.update {
-                it.copy(error = "请先结束当前实时会话，再事后重跑")
+                it.copy(error = str(R.string.reprocess_busy_live))
             }
             return
         }
         val file = SessionAudioRecorder.fileForPath(audioPath)
         if (file == null) {
-            _state.update { it.copy(error = "录音文件无效或已损坏") }
+            _state.update { it.copy(error = str(R.string.reprocess_bad_audio)) }
             return
         }
 
@@ -185,14 +190,14 @@ class OfflineReprocessPipeline(
             } catch (e: CancellationException) {
                 _state.value = ReprocessUiState(
                     phase = ReprocessPhase.Idle,
-                    error = "已取消重跑"
+                    error = str(R.string.reprocess_cancelled)
                 )
                 throw e
             } catch (e: Exception) {
                 android.util.Log.e(TAG, "reprocess failed", e)
                 _state.value = ReprocessUiState(
                     phase = ReprocessPhase.Idle,
-                    error = e.message ?: "重跑失败"
+                    error = e.message ?: str(R.string.reprocess_failed)
                 )
             }
         }
@@ -202,13 +207,13 @@ class OfflineReprocessPipeline(
         val settings = settingsRepo.settings.first()
         validateKeys(settings)
         if (!network.isOnline()) {
-            throw Exception("当前离线，无法导入文件")
+            throw Exception(str(R.string.offline_offline))
         }
 
         val startedAt = System.currentTimeMillis()
         _state.value = ReprocessUiState(
             phase = ReprocessPhase.Running,
-            message = "正在复制文件…"
+            message = str(R.string.offline_copying)
         )
 
         val workDir = File(appContext.cacheDir, "import_audio").apply { mkdirs() }
@@ -218,18 +223,18 @@ class OfflineReprocessPipeline(
         copyUriToFile(uri, inputCopy)
 
         checkCancel()
-        _state.update { it.copy(message = "FFmpeg 转码中…") }
+        _state.update { it.copy(message = str(R.string.offline_ffmpeg)) }
         val converted = ffmpeg.convertTo16kMonoWav(
             inputPath = inputCopy.absolutePath,
             outputWav = outWav
         ) { p ->
             _state.update {
-                it.copy(message = "FFmpeg 转码 ${(p * 100).toInt()}%")
+                it.copy(message = str(R.string.offline_ffmpeg_pct, (p * 100).toInt()))
             }
         }
 
         checkCancel()
-        _state.update { it.copy(message = "安装会话录音…") }
+        _state.update { it.copy(message = str(R.string.offline_install_wav)) }
         val sessionPath = installSessionWav(converted.wavFile, startedAt)
         runCatching { inputCopy.delete() }
         if (outWav.absolutePath != sessionPath) {
@@ -256,22 +261,22 @@ class OfflineReprocessPipeline(
         val settings = settingsRepo.settings.first()
         validateKeys(settings)
         if (!network.isOnline()) {
-            throw Exception("当前离线，无法处理")
+            throw Exception(str(R.string.offline_offline))
         }
 
         _state.value = ReprocessUiState(
             phase = ReprocessPhase.Running,
-            message = "读取录音…",
+            message = str(R.string.offline_read_audio),
             activeAudioPath = audioPath
         )
 
         val chunks = try {
             WavChunker.chunkPcm(file)
         } catch (e: Exception) {
-            throw Exception("无法读取录音：${e.message}")
+            throw Exception(str(R.string.offline_read_fail, e.message ?: ""))
         }
         if (chunks.isEmpty()) {
-            throw Exception("录音无有效音频数据")
+            throw Exception(str(R.string.offline_no_pcm))
         }
 
         checkCancel()
@@ -282,7 +287,7 @@ class OfflineReprocessPipeline(
                 it.copy(
                     asrChunkIndex = chunk.index + 1,
                     asrChunkTotal = chunk.total,
-                    message = "识别 ${chunk.index + 1}/${chunk.total}"
+                    message = str(R.string.offline_asr_progress, chunk.index + 1, chunk.total)
                 )
             }
             val text = transcribeWithRetry(chunk, settings)
@@ -291,12 +296,12 @@ class OfflineReprocessPipeline(
 
         val fullText = asrParts.joinToString(" ").trim()
         if (fullText.isBlank()) {
-            throw Exception("ASR 未识别到有效文本")
+            throw Exception(str(R.string.offline_asr_empty))
         }
 
         val sentences = PunctuationSegmenter.split(fullText)
         if (sentences.isEmpty()) {
-            throw Exception("标点切句后无有效句子")
+            throw Exception(str(R.string.offline_split_empty))
         }
 
         checkCancel()
@@ -311,7 +316,7 @@ class OfflineReprocessPipeline(
                 it.copy(
                     translateIndex = idx + 1,
                     translateTotal = sentences.size,
-                    message = "翻译 ${idx + 1}/${sentences.size}"
+                    message = str(R.string.offline_translate_progress, idx + 1, sentences.size)
                 )
             }
             val zh = translateWithRetry(sentence, window.toList(), settings)
@@ -332,7 +337,7 @@ class OfflineReprocessPipeline(
         checkCancel()
         val title = resolveTitle(segments, settings, baseTitle, titlePolicy)
         _state.update {
-            it.copy(message = "保存会话…", sessionTitle = title)
+            it.copy(message = str(R.string.offline_saving), sessionTitle = title)
         }
         val endedAt = System.currentTimeMillis()
         val id = history.saveSession(
@@ -345,7 +350,7 @@ class OfflineReprocessPipeline(
 
         _state.value = ReprocessUiState(
             phase = ReprocessPhase.Idle,
-            message = "已保存：$title",
+            message = str(R.string.offline_saved, title),
             lastSavedSessionId = id,
             sessionTitle = title
         )
@@ -379,7 +384,7 @@ class OfflineReprocessPipeline(
         if (settings.llmApiKey.isBlank()) return null
         if (!network.isOnline()) return null
         checkCancel()
-        _state.update { it.copy(message = "生成会话标题…") }
+        _state.update { it.copy(message = str(R.string.offline_title_gen)) }
         return try {
             withTimeoutOrNull(TITLE_CALL_TIMEOUT_MS) {
                 llm.summarizeSessionTitle(
@@ -409,7 +414,7 @@ class OfflineReprocessPipeline(
         val zh = segments.joinToString(" ") { it.translation }.trim().take(80)
         if (zh.isNotBlank()) return zh
         val en = segments.joinToString(" ") { it.source }.trim().take(80)
-        return en.ifBlank { "文件导入" }
+        return en.ifBlank { str(R.string.offline_file_title_fallback) }
     }
 
     private fun installSessionWav(source: File, startedAt: Long): String {
@@ -419,7 +424,7 @@ class OfflineReprocessPipeline(
         val dest = File(dir, "session_${stamp}_import.wav")
         source.copyTo(dest, overwrite = true)
         if (!dest.isFile || dest.length() < 44L) {
-            throw IllegalStateException("导入会话 WAV 写入失败")
+            throw IllegalStateException(str(R.string.import_wav_fail))
         }
         return dest.absolutePath
     }
@@ -429,9 +434,9 @@ class OfflineReprocessPipeline(
             FileOutputStream(dest).use { output ->
                 input.copyTo(output)
             }
-        } ?: throw IllegalStateException("无法读取所选文件")
+        } ?: throw IllegalStateException(str(R.string.import_uri_fail))
         if (!dest.isFile || dest.length() < 64L) {
-            throw IllegalStateException("文件过小或复制失败")
+            throw IllegalStateException(str(R.string.import_file_too_small))
         }
     }
 
@@ -449,10 +454,10 @@ class OfflineReprocessPipeline(
 
     private fun validateKeys(settings: UserSettings) {
         if (settings.asrApiKey.isBlank()) {
-            throw Exception("ASR API Key is empty. Configure it in Settings.")
+            throw Exception(str(R.string.asr_key_empty))
         }
         if (settings.llmApiKey.isBlank()) {
-            throw Exception("LLM API Key is empty. Configure it in Settings.")
+            throw Exception(str(R.string.llm_key_empty))
         }
     }
 
@@ -482,7 +487,9 @@ class OfflineReprocessPipeline(
                 delay(500L * attempt * attempt)
             }
         }
-        throw Exception("ASR 失败（块 ${chunk.index + 1}/${chunk.total}）：${last?.message}")
+        throw Exception(
+            str(R.string.offline_asr_fail, chunk.index + 1, chunk.total, last?.message ?: "")
+        )
     }
 
     private suspend fun translateWithRetry(
@@ -506,7 +513,9 @@ class OfflineReprocessPipeline(
                 delay(500L * attempt * attempt)
             }
         }
-        throw Exception("翻译失败：「${source.take(40)}」${last?.message}")
+        throw Exception(
+            str(R.string.offline_translate_fail, source.take(40), last?.message ?: "")
+        )
     }
 
     private suspend fun awaitOnline() {
@@ -580,7 +589,7 @@ class OfflineReprocessPipeline(
                 }
             }
         }
-        if (zh.isBlank()) throw Exception("译文为空")
+        if (zh.isBlank()) throw Exception(str(R.string.offline_empty_translation))
         return zh.trim()
     }
 

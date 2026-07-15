@@ -94,7 +94,7 @@ fun LiveTranslateScreen(
         viewModel.clearReprocessSaved()
         android.widget.Toast.makeText(
             context,
-            context.getString(R.string.reprocess_saved) + " (#$id)",
+            context.getString(R.string.reprocess_saved_id, id),
             android.widget.Toast.LENGTH_SHORT
         ).show()
     }
@@ -133,7 +133,7 @@ fun LiveTranslateScreen(
             text = { Text(reprocess.error!!) },
             confirmButton = {
                 TextButton(onClick = viewModel::clearReprocessError) {
-                    Text("OK")
+                    Text(stringResource(R.string.ok))
                 }
             }
         )
@@ -161,7 +161,7 @@ fun LiveTranslateScreen(
         } else {
             android.widget.Toast.makeText(
                 context,
-                "未授予录屏/内部音频权限，无法使用 Internal",
+                context.getString(R.string.projection_denied),
                 android.widget.Toast.LENGTH_LONG
             ).show()
         }
@@ -252,7 +252,7 @@ fun LiveTranslateScreen(
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("Live Translate") },
+                title = { Text(stringResource(R.string.live_title)) },
                 actions = {
                     IconButton(onClick = {
                         val srt = viewModel.exportSrt(ExportTextMode.Both)
@@ -379,7 +379,7 @@ fun LiveTranslateScreen(
                 )
                 reprocess.sessionTitle?.let { t ->
                     Text(
-                        text = "标题：$t",
+                        text = stringResource(R.string.session_title_prefix, t),
                         style = MaterialTheme.typography.labelMedium,
                         color = MaterialTheme.colorScheme.primary
                     )
@@ -462,7 +462,7 @@ fun LiveTranslateScreen(
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Text("Source", style = MaterialTheme.typography.labelLarge)
+                Text(stringResource(R.string.source_label), style = MaterialTheme.typography.labelLarge)
                 FilterChip(
                     selected = state.audioSource == AudioSourceType.Microphone,
                     onClick = {
@@ -470,7 +470,7 @@ fun LiveTranslateScreen(
                             viewModel.setAudioSource(AudioSourceType.Microphone)
                         }
                     },
-                    label = { Text("Mic") },
+                    label = { Text(stringResource(R.string.source_mic)) },
                     enabled = state.phase == SessionPhase.Idle
                 )
                 FilterChip(
@@ -480,7 +480,7 @@ fun LiveTranslateScreen(
                             viewModel.setAudioSource(AudioSourceType.Internal)
                         }
                     },
-                    label = { Text("Internal") },
+                    label = { Text(stringResource(R.string.source_internal)) },
                     enabled = state.phase == SessionPhase.Idle &&
                         Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q
                 )
@@ -501,7 +501,7 @@ fun LiveTranslateScreen(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
-                Text("Floating bilingual captions")
+                Text(stringResource(R.string.overlay_enable))
                 Switch(
                     checked = state.overlayEnabled,
                     onCheckedChange = { on ->
@@ -527,7 +527,7 @@ fun LiveTranslateScreen(
             }
 
             Spacer(Modifier.height(8.dp))
-            Text("English", fontWeight = FontWeight.Bold)
+            Text(stringResource(R.string.live_panel_source), fontWeight = FontWeight.Bold)
             Text(
                 text = buildDisplay(state.cumulativeEn, state.partialEn),
                 modifier = Modifier
@@ -539,7 +539,7 @@ fun LiveTranslateScreen(
             )
 
             Spacer(Modifier.height(8.dp))
-            Text("中文", fontWeight = FontWeight.Bold)
+            Text(stringResource(R.string.live_panel_translation), fontWeight = FontWeight.Bold)
             Text(
                 text = buildDisplay(state.cumulativeZh, state.partialZh),
                 modifier = Modifier
@@ -574,7 +574,11 @@ fun LiveTranslateScreen(
                     text = {
                         Text(
                             stringResource(R.string.stop_message) +
-                                if (pending > 0) "\n\n当前积压约 $pending 项。" else ""
+                                if (pending > 0) {
+                                    stringResource(R.string.stop_pending_extra, pending)
+                                } else {
+                                    ""
+                                }
                         )
                     },
                     confirmButton = {
@@ -634,7 +638,7 @@ fun LiveTranslateScreen(
                             } catch (e: Exception) {
                                 android.widget.Toast.makeText(
                                     context,
-                                    e.message ?: "恢复录音失败",
+                                    e.message ?: context.getString(R.string.resume_failed),
                                     android.widget.Toast.LENGTH_LONG
                                 ).show()
                             }
@@ -647,10 +651,11 @@ fun LiveTranslateScreen(
                 ) {
                     Text(
                         when {
-                            state.phase == SessionPhase.Paused -> "Resume"
+                            state.phase == SessionPhase.Paused ->
+                                stringResource(R.string.resume)
                             state.audioSource == AudioSourceType.File ->
                                 stringResource(R.string.start_file)
-                            else -> "Start"
+                            else -> stringResource(R.string.start)
                         }
                     )
                 }
@@ -664,7 +669,7 @@ fun LiveTranslateScreen(
                         !state.draining &&
                         !reprocessBusy,
                     modifier = Modifier.weight(1f)
-                ) { Text("Pause") }
+                ) { Text(stringResource(R.string.pause)) }
                 OutlinedButton(
                     onClick = {
                         if (reprocessBusy || state.audioSource == AudioSourceType.File) {
@@ -682,7 +687,7 @@ fun LiveTranslateScreen(
                     enabled = (state.phase != SessionPhase.Idle || reprocessBusy) &&
                         !state.draining,
                     modifier = Modifier.weight(1f)
-                ) { Text("Stop") }
+                ) { Text(stringResource(R.string.stop)) }
             }
         }
     }

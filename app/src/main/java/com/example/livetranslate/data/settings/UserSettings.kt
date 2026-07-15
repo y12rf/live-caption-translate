@@ -35,6 +35,11 @@ data class UserSettings(
     val llmSystemPrompt: String = DEFAULT_LLM_SYSTEM_PROMPT,
     /** Global glossary pairs for `{{glossary}}` injection. */
     val glossaryTerms: List<GlossaryEntry> = emptyList(),
+    /**
+     * App UI language: [com.example.livetranslate.util.AppLocale.EN] (default)
+     * or [com.example.livetranslate.util.AppLocale.ZH]. Independent of ASR/LLM languages.
+     */
+    val uiLanguage: String = "en",
     val inputLanguage: String = "en",
     val outputLanguage: String = "zh",
     val silenceMs: Int = 500,

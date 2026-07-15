@@ -83,7 +83,7 @@ fun SettingsScreen(
             text = { Text(infoBody) },
             confirmButton = {
                 TextButton(onClick = { infoTitle = null }) {
-                    Text("OK")
+                    Text(stringResource(R.string.ok))
                 }
             }
         )
@@ -92,10 +92,13 @@ fun SettingsScreen(
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("Settings") },
+                title = { Text(stringResource(R.string.settings)) },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+                        Icon(
+                            Icons.AutoMirrored.Filled.ArrowBack,
+                            contentDescription = stringResource(R.string.back)
+                        )
                     }
                 }
             )
@@ -108,39 +111,64 @@ fun SettingsScreen(
                 .padding(16.dp)
                 .verticalScroll(rememberScrollState())
         ) {
-            sectionTitle("ASR")
+            val uiLangSection = stringResource(R.string.ui_language_section)
+            val uiLangInfo = stringResource(R.string.ui_language_info)
+            val apiUrlLabel = stringResource(R.string.settings_api_url)
+            val apiUrlInfo = stringResource(R.string.settings_info_asr_url)
+            val fullUrlTitle = stringResource(R.string.settings_full_url_title)
+            val fullUrlInfo = stringResource(R.string.settings_info_full_url)
+            val promptTitle = stringResource(R.string.settings_prompt_title)
+            val promptInfo = stringResource(R.string.settings_info_system_prompt)
+
+            sectionTitle(
+                title = uiLangSection,
+                onInfo = { showInfo(uiLangSection, uiLangInfo) }
+            )
+            val enLabel = stringResource(R.string.ui_language_en)
+            val zhLabel = stringResource(R.string.ui_language_zh)
+            val uiLangDisplay =
+                if (com.example.livetranslate.util.AppLocale.normalize(d.uiLanguage) ==
+                    com.example.livetranslate.util.AppLocale.ZH
+                ) {
+                    zhLabel
+                } else {
+                    enLabel
+                }
+            dropdownField(
+                label = stringResource(R.string.ui_language),
+                value = uiLangDisplay,
+                options = listOf(enLabel, zhLabel),
+                onSelect = { sel ->
+                    val code = if (sel == zhLabel) {
+                        com.example.livetranslate.util.AppLocale.ZH
+                    } else {
+                        com.example.livetranslate.util.AppLocale.EN
+                    }
+                    viewModel.updateDraft { s -> s.copy(uiLanguage = code) }
+                }
+            )
+            Spacer(Modifier.height(16.dp))
+
+            sectionTitle(stringResource(R.string.settings_asr))
             field(
-                label = "API URL",
+                label = apiUrlLabel,
                 value = d.asrBaseUrl,
                 onChange = { viewModel.updateDraft { s -> s.copy(asrBaseUrl = it) } },
-                onInfo = {
-                    showInfo(
-                        "ASR API URL",
-                        "默认：若 /v1/ 后已有路径则原样使用；否则自动补 path：\n" +
-                            "• OpenAiTranscriptions → /v1/audio/transcriptions\n" +
-                            "• ChatCompletionsAudio → /v1/chat/completions\n\n" +
-                            "打开「完整 URL」后：不做任何路径拼接，按填写内容原样请求。"
-                    )
-                }
+                onInfo = { showInfo(apiUrlLabel, apiUrlInfo) }
             )
             switchField(
-                label = "完整 URL（不拼接 path）",
+                label = stringResource(R.string.settings_full_url),
                 checked = d.asrFullUrl,
                 onChange = { viewModel.updateDraft { s -> s.copy(asrFullUrl = it) } },
-                onInfo = {
-                    showInfo(
-                        "完整 URL",
-                        "开启后，上方 API URL 将原样作为请求地址，不再拼接 /v1/… 路径。"
-                    )
-                }
+                onInfo = { showInfo(fullUrlTitle, fullUrlInfo) }
             )
             field(
-                label = "API Key",
+                label = stringResource(R.string.settings_api_key),
                 value = d.asrApiKey,
                 onChange = { viewModel.updateDraft { s -> s.copy(asrApiKey = it) } }
             )
             field(
-                label = "Model",
+                label = stringResource(R.string.settings_model),
                 value = d.asrModel,
                 onChange = { viewModel.updateDraft { s -> s.copy(asrModel = it) } }
             )
@@ -176,7 +204,10 @@ fun SettingsScreen(
                 enabled = !ui.asrLatencyTesting,
                 modifier = Modifier.fillMaxWidth()
             ) {
-                Text(if (ui.asrLatencyTesting) "Testing ASR…" else "Test ASR latency")
+                Text(
+                    if (ui.asrLatencyTesting) stringResource(R.string.settings_testing_asr)
+                    else stringResource(R.string.settings_test_asr)
+                )
             }
             ui.asrLatencyResult?.let {
                 Spacer(Modifier.height(4.dp))
@@ -255,25 +286,20 @@ fun SettingsScreen(
                 enabled = !ui.llmLatencyTesting,
                 modifier = Modifier.fillMaxWidth()
             ) {
-                Text(if (ui.llmLatencyTesting) "Testing LLM…" else "Test LLM latency")
+                Text(
+                    if (ui.llmLatencyTesting) stringResource(R.string.settings_testing_llm)
+                    else stringResource(R.string.settings_test_llm)
+                )
             }
             ui.llmLatencyResult?.let {
                 Spacer(Modifier.height(4.dp))
                 Text(it)
             }
             multilineField(
-                label = "Translation system prompt",
+                label = stringResource(R.string.settings_system_prompt),
                 value = d.llmSystemPrompt,
                 onChange = { viewModel.updateDraft { s -> s.copy(llmSystemPrompt = it) } },
-                onInfo = {
-                    showInfo(
-                        "System prompt",
-                        "翻译用系统提示词。占位符：\n" +
-                            "• {{to}} — 输出语言（设置里的 Output language）\n" +
-                            "• {{from}} — 输入语言（Input language）\n" +
-                            "• {{glossary}} — 术语表（见下方；prompt 中无此占位符则不注入）"
-                    )
-                }
+                onInfo = { showInfo(promptTitle, promptInfo) }
             )
             Button(
                 onClick = {
@@ -283,7 +309,7 @@ fun SettingsScreen(
                 },
                 modifier = Modifier.fillMaxWidth()
             ) {
-                Text("Reset prompt to default")
+                Text(stringResource(R.string.settings_reset_prompt))
             }
             OutlinedButton(
                 onClick = {
@@ -352,7 +378,7 @@ fun SettingsScreen(
                             }
                         }
                     ) {
-                        Text("删")
+                        Text(stringResource(R.string.glossary_remove))
                     }
                 }
                 Spacer(Modifier.height(6.dp))
@@ -373,14 +399,14 @@ fun SettingsScreen(
             }
 
             Spacer(Modifier.height(16.dp))
-            sectionTitle("Languages")
+            sectionTitle(stringResource(R.string.settings_languages))
             field(
-                label = "Input language",
+                label = stringResource(R.string.settings_input_lang),
                 value = d.inputLanguage,
                 onChange = { viewModel.updateDraft { s -> s.copy(inputLanguage = it) } }
             )
             field(
-                label = "Output language",
+                label = stringResource(R.string.settings_output_lang),
                 value = d.outputLanguage,
                 onChange = { viewModel.updateDraft { s -> s.copy(outputLanguage = it) } }
             )
@@ -675,7 +701,7 @@ fun SettingsScreen(
             Button(
                 onClick = viewModel::save,
                 modifier = Modifier.fillMaxWidth()
-            ) { Text("Save") }
+            ) { Text(stringResource(R.string.save)) }
             ui.savedMessage?.let {
                 Spacer(Modifier.height(8.dp))
                 Text(it)

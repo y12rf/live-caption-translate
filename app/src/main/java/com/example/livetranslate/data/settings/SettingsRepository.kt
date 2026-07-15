@@ -10,6 +10,7 @@ import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import com.example.livetranslate.data.llm.LlmThinkingMode
+import com.example.livetranslate.util.AppLocale
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
 
@@ -32,6 +33,7 @@ class SettingsRepository(private val context: Context) {
         val llmThinking = stringPreferencesKey("llm_thinking")
         val llmSystemPrompt = stringPreferencesKey("llm_system_prompt")
         val glossaryTerms = stringPreferencesKey("glossary_terms")
+        val uiLanguage = stringPreferencesKey("ui_language")
         val inputLanguage = stringPreferencesKey("input_language")
         val outputLanguage = stringPreferencesKey("output_language")
         val silenceMs = intPreferencesKey("silence_ms")
@@ -65,6 +67,7 @@ class SettingsRepository(private val context: Context) {
             llmThinking = p[Keys.llmThinking] ?: defaults.llmThinking,
             llmSystemPrompt = p[Keys.llmSystemPrompt] ?: defaults.llmSystemPrompt,
             glossaryTerms = GlossaryCodec.decode(p[Keys.glossaryTerms]),
+            uiLanguage = AppLocale.normalize(p[Keys.uiLanguage] ?: defaults.uiLanguage),
             inputLanguage = p[Keys.inputLanguage] ?: defaults.inputLanguage,
             outputLanguage = p[Keys.outputLanguage] ?: defaults.outputLanguage,
             silenceMs = p[Keys.silenceMs] ?: defaults.silenceMs,
@@ -101,6 +104,7 @@ class SettingsRepository(private val context: Context) {
                 llmThinking = prefs[Keys.llmThinking] ?: d.llmThinking,
                 llmSystemPrompt = prefs[Keys.llmSystemPrompt] ?: d.llmSystemPrompt,
                 glossaryTerms = GlossaryCodec.decode(prefs[Keys.glossaryTerms]),
+                uiLanguage = AppLocale.normalize(prefs[Keys.uiLanguage] ?: d.uiLanguage),
                 inputLanguage = prefs[Keys.inputLanguage] ?: d.inputLanguage,
                 outputLanguage = prefs[Keys.outputLanguage] ?: d.outputLanguage,
                 silenceMs = prefs[Keys.silenceMs] ?: d.silenceMs,
@@ -134,6 +138,7 @@ class SettingsRepository(private val context: Context) {
                 UserSettings.DEFAULT_LLM_SYSTEM_PROMPT
             }
             prefs[Keys.glossaryTerms] = GlossaryCodec.encode(next.glossaryTerms)
+            prefs[Keys.uiLanguage] = AppLocale.normalize(next.uiLanguage)
             prefs[Keys.inputLanguage] = next.inputLanguage
             prefs[Keys.outputLanguage] = next.outputLanguage
             prefs[Keys.silenceMs] = next.silenceMs

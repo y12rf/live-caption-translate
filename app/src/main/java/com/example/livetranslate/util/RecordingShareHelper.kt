@@ -11,6 +11,7 @@ import android.provider.MediaStore
 import android.util.Log
 import android.widget.Toast
 import androidx.core.content.FileProvider
+import com.example.livetranslate.R
 import java.io.File
 import java.io.FileInputStream
 import java.io.FileOutputStream
@@ -31,15 +32,19 @@ object RecordingShareHelper {
         context: Context,
         text: String,
         label: String = "text",
-        toastOk: String = "已复制到剪贴板"
+        toastOk: String? = null
     ) {
         if (text.isBlank()) {
-            Toast.makeText(context, "内容为空", Toast.LENGTH_SHORT).show()
+            Toast.makeText(context, context.getString(R.string.share_content_empty), Toast.LENGTH_SHORT).show()
             return
         }
         val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
         cm.setPrimaryClip(ClipData.newPlainText(label, text))
-        Toast.makeText(context, toastOk, Toast.LENGTH_SHORT).show()
+        Toast.makeText(
+            context,
+            toastOk ?: context.getString(R.string.copied_zh),
+            Toast.LENGTH_SHORT
+        ).show()
     }
 
     /**
@@ -54,7 +59,7 @@ object RecordingShareHelper {
         mimeType: String = "application/x-subrip"
     ): String? {
         if (content.isBlank()) {
-            Toast.makeText(context, "内容为空", Toast.LENGTH_SHORT).show()
+            Toast.makeText(context, context.getString(R.string.share_content_empty), Toast.LENGTH_SHORT).show()
             return null
         }
         val ext = extension.removePrefix(".")
@@ -87,11 +92,19 @@ object RecordingShareHelper {
                 val dest = uniqueFile(dir, displayName)
                 FileOutputStream(dest).use { it.write(content.toByteArray(Charsets.UTF_8)) }
             }
-            Toast.makeText(context, "已导出到下载: $displayName", Toast.LENGTH_LONG).show()
+            Toast.makeText(
+                context,
+                context.getString(R.string.share_export_ok, displayName),
+                Toast.LENGTH_LONG
+            ).show()
             displayName
         } catch (e: Exception) {
             Log.e(TAG, "exportTextToDownloads failed", e)
-            Toast.makeText(context, "导出失败: ${e.message}", Toast.LENGTH_LONG).show()
+            Toast.makeText(
+                context,
+                context.getString(R.string.share_export_fail, e.message ?: ""),
+                Toast.LENGTH_LONG
+            ).show()
             null
         }
     }
@@ -100,11 +113,11 @@ object RecordingShareHelper {
     fun shareText(
         context: Context,
         text: String,
-        chooserTitle: String = "分享",
+        chooserTitle: String? = null,
         mimeType: String = "text/plain"
     ) {
         if (text.isBlank()) {
-            Toast.makeText(context, "内容为空", Toast.LENGTH_SHORT).show()
+            Toast.makeText(context, context.getString(R.string.share_content_empty), Toast.LENGTH_SHORT).show()
             return
         }
         val send = Intent(Intent.ACTION_SEND).apply {
@@ -112,13 +125,16 @@ object RecordingShareHelper {
             putExtra(Intent.EXTRA_TEXT, text)
         }
         context.startActivity(
-            Intent.createChooser(send, chooserTitle).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            Intent.createChooser(
+                send,
+                chooserTitle ?: context.getString(R.string.share)
+            ).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         )
     }
 
-    fun shareAudio(context: Context, file: File, chooserTitle: String = "分享录音") {
+    fun shareAudio(context: Context, file: File, chooserTitle: String? = null) {
         if (!file.isFile || file.length() <= 0L) {
-            Toast.makeText(context, "录音文件不存在", Toast.LENGTH_SHORT).show()
+            Toast.makeText(context, context.getString(R.string.share_audio_missing), Toast.LENGTH_SHORT).show()
             return
         }
         val uri = uriForFile(context, file)
@@ -129,14 +145,17 @@ object RecordingShareHelper {
             clipData = ClipData.newUri(context.contentResolver, file.name, uri)
         }
         context.startActivity(
-            Intent.createChooser(send, chooserTitle).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            Intent.createChooser(
+                send,
+                chooserTitle ?: context.getString(R.string.share_audio)
+            ).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         )
     }
 
     /** Copy session WAV into public Downloads. */
     fun exportAudioToDownloads(context: Context, file: File): String? {
         if (!file.isFile || file.length() <= 0L) {
-            Toast.makeText(context, "录音文件不存在", Toast.LENGTH_SHORT).show()
+            Toast.makeText(context, context.getString(R.string.share_audio_missing), Toast.LENGTH_SHORT).show()
             return null
         }
         val displayName = file.name
@@ -166,11 +185,19 @@ object RecordingShareHelper {
                     FileOutputStream(dest).use { output -> input.copyTo(output) }
                 }
             }
-            Toast.makeText(context, "已导出到下载: $displayName", Toast.LENGTH_LONG).show()
+            Toast.makeText(
+                context,
+                context.getString(R.string.share_export_ok, displayName),
+                Toast.LENGTH_LONG
+            ).show()
             displayName
         } catch (e: Exception) {
             Log.e(TAG, "exportAudioToDownloads failed", e)
-            Toast.makeText(context, "导出录音失败: ${e.message}", Toast.LENGTH_LONG).show()
+            Toast.makeText(
+                context,
+                context.getString(R.string.share_audio_export_fail, e.message ?: ""),
+                Toast.LENGTH_LONG
+            ).show()
             null
         }
     }

@@ -101,7 +101,7 @@ fun HistoryScreen(
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("History") },
+                title = { Text(stringResource(R.string.history)) },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
@@ -137,7 +137,7 @@ fun HistoryScreen(
             when {
                 sessions.isEmpty() && query.isBlank() -> {
                     Text(
-                        "No sessions yet",
+                        stringResource(R.string.history_empty),
                         modifier = Modifier.padding(16.dp)
                     )
                 }
@@ -302,7 +302,7 @@ fun HistoryDetailScreen(
             text = { Text(reprocess.error!!) },
             confirmButton = {
                 TextButton(onClick = viewModel::clearReprocessError) {
-                    Text("OK")
+                    Text(stringResource(R.string.ok))
                 }
             }
         )
@@ -469,7 +469,10 @@ fun HistoryDetailScreen(
     ) { padding ->
         val d = detail
         if (d == null) {
-            Text("Loading...", modifier = Modifier.padding(padding).padding(16.dp))
+            Text(
+                stringResource(R.string.loading),
+                modifier = Modifier.padding(padding).padding(16.dp)
+            )
         } else {
             val hasAudio = SessionAudioRecorder.fileForPath(d.session.audioPath) != null
             Column(
@@ -558,7 +561,7 @@ fun HistoryDetailScreen(
                     if (d.segments.isEmpty()) {
                         item {
                             Text(
-                                "(无文稿段落，仅有录音)",
+                                stringResource(R.string.history_no_segments),
                                 modifier = Modifier.padding(vertical = 16.dp),
                                 style = MaterialTheme.typography.bodyMedium
                             )
@@ -598,9 +601,13 @@ fun HistoryDetailScreen(
                                     style = MaterialTheme.typography.labelSmall,
                                     fontWeight = if (active) FontWeight.Bold else FontWeight.Normal
                                 )
-                                Text("EN: ${seg.source}")
-                                Text("ZH: ${seg.translation}")
-                                if (seg.incomplete) Text("(incomplete)")
+                                Text("${stringResource(R.string.label_source)}: ${seg.source}")
+                                Text(
+                                    "${stringResource(R.string.label_translation)}: ${seg.translation}"
+                                )
+                                if (seg.incomplete) {
+                                    Text(stringResource(R.string.segment_incomplete))
+                                }
                             }
                             HorizontalDivider()
                         }
