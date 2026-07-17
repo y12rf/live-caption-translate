@@ -23,13 +23,18 @@ import com.example.livetranslate.domain.model.TranscriptSegment
  *
  * When a new sentence is recognized while the current line is still scrolling,
  * [onBacklog] fires with the pending queue depth so the UI can **speed up**
- * the active marquee and catch up.
+ * the active marquee and catch up. [onShow] also receives that depth so the
+ * **next** line can start already at catch-up speed / short dwell.
  */
 class OverlayScrollController(
-    private val onShow: (OverlayCaption) -> Unit,
+    /**
+     * @param catchUpDepth how many committed captions are still queued **behind**
+     * the one being shown (0 = play at base speed).
+     */
+    private val onShow: (cap: OverlayCaption, catchUpDepth: Int) -> Unit,
     private val onBacklog: (queueDepth: Int) -> Unit = {},
     /** Refresh the currently displayed caption (e.g. translation just arrived). */
-    private val onUpdate: (OverlayCaption) -> Unit = onShow
+    private val onUpdate: (OverlayCaption) -> Unit = { }
 ) {
     data class OverlayCaption(val en: String, val zh: String)
 
@@ -100,7 +105,6 @@ class OverlayScrollController(
         val mode = settings.overlayTextModeEnum()
         val asrOnly = settings.asrOnlyMode
         val holdForZh = shouldHoldForTranslation(mode, asrOnly)
-        var newlyEnqueued = 0
         for (seg in state.segments) {
             if (seg.source.isBlank() && seg.translation.isBlank()) continue
             val en = mapEn(seg, mode)
@@ -117,7 +121,6 @@ class OverlayScrollController(
                     continue
                 }
                 queue.addLast(Queued(seg.localId, en, zh, seg.timestampMs))
-                newlyEnqueued++
             } else {
                 // Update translation when LLM finishes / fails for held / queued / current
                 held[seg.localId]?.let { h ->
@@ -130,7 +133,6 @@ class OverlayScrollController(
                     if (isTranslationReady(seg, zh) || stampChanged) {
                         held.remove(seg.localId)
                         queue.addLast(h)
-                        newlyEnqueued++
                     }
                     return@let
                 } ?: run {
@@ -151,8 +153,9 @@ class OverlayScrollController(
         }
         pruneSeenIds(state.segments)
         tryShowNext()
-        // Next sentence recognized while current is still scrolling → catch up
-        if (finishBeforeNext && scrolling && newlyEnqueued > 0 && queue.isNotEmpty()) {
+        // While a line is on screen with backlog, keep catch-up applied (new items
+        // or re-assert after UI resets). Depth is always current queue size.
+        if (finishBeforeNext && scrolling && queue.isNotEmpty()) {
             onBacklog(queue.size)
         }
     }
@@ -184,11 +187,9 @@ class OverlayScrollController(
         currentEn = next.en
         currentZh = next.zh
         scrolling = true
-        onShow(OverlayCaption(next.en, next.zh))
-        // Already have more queued: start this line at catch-up speed too
-        if (finishBeforeNext && queue.isNotEmpty()) {
-            onBacklog(queue.size)
-        }
+        // Remaining queue after dequeue = captions still waiting behind this one.
+        val catchUpDepth = if (finishBeforeNext) queue.size else 0
+        onShow(OverlayCaption(next.en, next.zh), catchUpDepth)
     }
 
     private fun mapEn(seg: TranscriptSegment, mode: OverlayTextMode): String =

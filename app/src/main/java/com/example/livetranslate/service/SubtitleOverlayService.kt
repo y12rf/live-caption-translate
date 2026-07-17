@@ -67,10 +67,23 @@ class SubtitleOverlayService : Service() {
     private var lastLayoutMode: OverlayLayoutMode? = null
     /** Latest session snapshot for layout-switch catch-up (avoid full replay). */
     private var lastSessionState: LiveSessionUiState = LiveSessionUiState()
+    /**
+     * Latest backlog depth for the caption currently on screen (queue behind it).
+     * Kept so mid-scroll translation fill-ins inherit catch-up speed/dwell.
+     */
+    private var activeCatchUpDepth: Int = 0
     private val scrollController = OverlayScrollController(
-        onShow = { cap -> showCaption(cap, isUpdate = false) },
-        onBacklog = { depth -> applyCatchUpSpeed(depth) },
-        onUpdate = { cap -> showCaption(cap, isUpdate = true) }
+        onShow = { cap, depth ->
+            activeCatchUpDepth = depth
+            showCaption(cap, isUpdate = false, catchUpDepth = depth)
+        },
+        onBacklog = { depth ->
+            activeCatchUpDepth = depth
+            applyCatchUpSpeed(depth)
+        },
+        onUpdate = { cap ->
+            showCaption(cap, isUpdate = true, catchUpDepth = activeCatchUpDepth)
+        }
     )
     /** How many marquee lines still need to finish for the current caption. */
     private var pendingLineFinishes = 0
@@ -245,6 +258,7 @@ class SubtitleOverlayService : Service() {
                         // Always reset controller on Idle (including save-failed with segments).
                         scrollController.reset()
                         pendingLineFinishes = 0
+                        activeCatchUpDepth = 0
                         lastShownEn = ""
                         lastShownZh = ""
                         idleBlankedFingerprint = null
@@ -283,6 +297,7 @@ class SubtitleOverlayService : Service() {
         // Mark existing segments seen so we do not re-marquee the whole session.
         scrollController.resetCatchUp(lastSessionState.segments)
         pendingLineFinishes = 0
+        activeCatchUpDepth = 0
         lastShownEn = ""
         lastShownZh = ""
         idleBlankedFingerprint = null
@@ -299,7 +314,8 @@ class SubtitleOverlayService : Service() {
                     if (cap.en.isNotBlank() || cap.zh.isNotBlank()) {
                         showCaption(
                             OverlayScrollController.OverlayCaption(cap.en, cap.zh),
-                            isUpdate = false
+                            isUpdate = false,
+                            catchUpDepth = 0
                         )
                     }
                 }
@@ -322,7 +338,8 @@ class SubtitleOverlayService : Service() {
 
     private fun showCaption(
         cap: OverlayScrollController.OverlayCaption,
-        isUpdate: Boolean
+        isUpdate: Boolean,
+        catchUpDepth: Int = 0
     ) {
         val layout = overlaySettings.overlayLayoutModeEnum()
         val mode = overlaySettings.overlayTextModeEnum()
@@ -332,14 +349,23 @@ class SubtitleOverlayService : Service() {
             cap.zh.isNotBlank()
         val newEn = if (showEn) cap.en else ""
         val newZh = if (showZh) cap.zh else ""
+        val depth = catchUpDepth.coerceAtLeast(0)
+        val baseSpeed = overlaySettings.overlayMarqueeSpeed
+            .coerceIn(20, CaptionLineView.SETTINGS_MAX_SPEED.toInt())
+            .toFloat()
+        val playSpeed = if (depth > 0 && layout == OverlayLayoutMode.ScrollLine) {
+            OverlayScrollController.catchUpSpeed(baseSpeed, depth)
+        } else {
+            baseSpeed
+        }
 
         if (!isUpdate) {
-            // Start each caption at the user base speed; backlog callback may boost after
-            val baseSpeed = overlaySettings.overlayMarqueeSpeed
-                .coerceIn(20, CaptionLineView.SETTINGS_MAX_SPEED.toInt())
-                .toFloat()
-            enView?.speedPxPerSec = baseSpeed
-            zhView?.speedPxPerSec = baseSpeed
+            // Apply catch-up speed / depth *before* setCaptionText so marquee/dwell
+            // start already accelerated when backlog exists (not only mid-scroll).
+            enView?.setCatchUpDepth(depth)
+            zhView?.setCatchUpDepth(depth)
+            enView?.speedPxPerSec = playSpeed
+            zhView?.speedPxPerSec = playSpeed
             // Count lines that will report finish (marquee or dwell)
             pendingLineFinishes = 0
             if (layout == OverlayLayoutMode.ScrollLine) {
@@ -374,11 +400,22 @@ class SubtitleOverlayService : Service() {
         ) {
             pendingLineFinishes++
         }
+        // New sibling line should inherit catch-up speed/dwell.
+        if (depth > 0 && layout == OverlayLayoutMode.ScrollLine) {
+            enView?.setCatchUpDepth(depth)
+            zhView?.setCatchUpDepth(depth)
+            enView?.speedPxPerSec = playSpeed
+            zhView?.speedPxPerSec = playSpeed
+        }
         idleBlankedFingerprint = null
         enView?.setCaptionText(newEn)
         zhView?.setCaptionText(newZh)
         lastShownEn = newEn
         lastShownZh = newZh
+        // Re-apply catch-up to the line that just started (and keep the other boosted).
+        if (depth > 0 && layout == OverlayLayoutMode.ScrollLine) {
+            applyCatchUpSpeed(depth)
+        }
         onCaptionContentApplied(newEn, newZh)
     }
 
@@ -397,7 +434,8 @@ class SubtitleOverlayService : Service() {
 
     /**
      * When the next committed sentence is already queued, speed up the active
-     * marquee so the overlay catches up instead of lagging further behind speech.
+     * marquee and shorten dwell so the overlay catches up instead of lagging
+     * further behind speech.
      */
     private fun applyCatchUpSpeed(queueDepth: Int) {
         if (queueDepth <= 0) return
@@ -407,6 +445,10 @@ class SubtitleOverlayService : Service() {
             .coerceIn(20, CaptionLineView.SETTINGS_MAX_SPEED.toInt())
             .toFloat()
         val boosted = OverlayScrollController.catchUpSpeed(base, queueDepth)
+        enView?.setCatchUpDepth(queueDepth)
+        zhView?.setCatchUpDepth(queueDepth)
+        // applySpeedNow always stores speed (even on empty sibling) then rebuilds
+        // any running marquee / shortens dwell.
         enView?.applySpeedNow(boosted)
         zhView?.applySpeedNow(boosted)
     }
@@ -506,6 +548,7 @@ class SubtitleOverlayService : Service() {
         }
         clearOverlayTextOnly()
         pendingLineFinishes = 0
+        activeCatchUpDepth = 0
         lastShownEn = ""
         lastShownZh = ""
         // Allow next queued ScrollLine caption (if any) after we force-clear mid-scroll.
