@@ -2,9 +2,11 @@
 
 **v1.1.0** · Kotlin + Jetpack Compose · MIT
 
+**English** · [中文](README.zh-CN.md)
+
 Near-real-time speech → OpenAI-compatible **ASR stream** → **LLM stream** translation → bilingual UI / floating captions → Room history + session WAV.
 
-Bring your own ASR / LLM API keys (nothing is hardcoded).
+Bring your own ASR / LLM API keys .
 
 适合上课听讲做笔记：自备 ASR / LLM API。
 
