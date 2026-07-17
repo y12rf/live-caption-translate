@@ -41,7 +41,9 @@ import kotlin.math.abs
  *
  * - Rounded corners, configurable size / colors / opacity / font / text mode (Settings)
  * - Layout: full sentence (centered) or single-line marquee
- * - Clears text after [IDLE_BLANK_MS] with no new caption content
+ * - Clears text after [IDLE_BLANK_MS] with no new caption activity.
+ *   ScrollLine defers that timer until the current marquee/dwell finishes so
+ *   long lines are not wiped mid-scroll.
  * - Lock / unlock via **notification** action (not tap on overlay)
  * - Unlocked → drag to reposition; locked → fixed + touch-through
  */
@@ -438,16 +440,46 @@ class SubtitleOverlayService : Service() {
         if (pendingLineFinishes <= 0) return
         pendingLineFinishes--
         if (pendingLineFinishes <= 0) {
+            // May synchronously start the next queued caption (pendingLineFinishes > 0 again).
             scrollController.onScrollFinished()
+            // Queue empty: marquee/dwell done — start idle blank only now so long
+            // lines are never wiped mid-scroll by the 3s timer.
+            maybeScheduleIdleBlankAfterScrollLineSettled()
         }
     }
 
     /**
-     * Restart the idle-blank timer when non-empty caption text is applied.
-     * After [IDLE_BLANK_MS] with no further content, clear the floating text.
+     * After all ScrollLine rows finished (or were not running), schedule idle blank
+     * if non-empty text is still on screen. Skipped when the next caption already
+     * started (pendingLineFinishes > 0).
+     */
+    private fun maybeScheduleIdleBlankAfterScrollLineSettled() {
+        if (pendingLineFinishes > 0) return
+        if (lastShownEn.isBlank() && lastShownZh.isBlank()) {
+            cancelIdleBlankTimer()
+            return
+        }
+        scheduleIdleBlank()
+    }
+
+    /**
+     * Handle non-empty caption application for idle-blank scheduling.
+     *
+     * - FullSentence: restart [IDLE_BLANK_MS] whenever content changes.
+     * - ScrollLine while marquee/dwell still running ([pendingLineFinishes] > 0):
+     *   do **not** start the timer (avoids clearing mid-scroll). Timer starts in
+     *   [onLineMarqueeFinished] after all lines finish and no next caption is shown.
+     * - ScrollLine with no pending finishes (e.g. rare post-settle update): schedule now.
      */
     private fun onCaptionContentApplied(en: String, zh: String) {
         if (en.isBlank() && zh.isBlank()) {
+            cancelIdleBlankTimer()
+            return
+        }
+        if (overlaySettings.overlayLayoutModeEnum() == OverlayLayoutMode.ScrollLine &&
+            pendingLineFinishes > 0
+        ) {
+            // Still scrolling/dwelling — cancel any prior timer; wait for finish.
             cancelIdleBlankTimer()
             return
         }
@@ -733,7 +765,11 @@ class SubtitleOverlayService : Service() {
     companion object {
         private const val TAG = "SubtitleOverlay"
         private const val CORNER_RADIUS_DP = 14f
-        /** Clear floating caption text after this long without new content. */
+        /**
+         * Clear floating caption text after this long without new caption activity.
+         * For ScrollLine, the countdown starts only after the current marquee/dwell
+         * finishes (not when the line first appears).
+         */
         const val IDLE_BLANK_MS = 3_000L
         const val ACTION_TOGGLE_LOCK = "com.example.livetranslate.action.OVERLAY_TOGGLE_LOCK"
         const val ACTION_APPLY_LOCK = "com.example.livetranslate.action.OVERLAY_APPLY_LOCK"
