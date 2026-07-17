@@ -50,7 +50,7 @@ object SettingsValidation {
             w += "Translation cache max should be 0–500 (got ${s.translationCacheMax})"
         }
 
-        // --- Overlay ---
+        // --- Overlay / captions ---
         if (s.overlayMaxWidthDp < 120 || s.overlayMaxWidthDp > 2000) {
             w += "Overlay max width dp should be 120–2000"
         }
@@ -59,6 +59,12 @@ object SettingsValidation {
         }
         if (s.overlayAlphaPercent < 0 || s.overlayAlphaPercent > 100) {
             w += "Overlay alpha % should be 0–100"
+        }
+        if (s.overlayFontSizeSp < 10 || s.overlayFontSizeSp > 48) {
+            w += "Overlay font size sp should be 10–48"
+        }
+        if (s.liveFontSizeSp < 10 || s.liveFontSizeSp > 48) {
+            w += "Live font size sp should be 10–48"
         }
         val badColor = listOf(
             s.overlayBgColor to "overlay background",
@@ -77,9 +83,11 @@ object SettingsValidation {
         if (s.asrBaseUrl.isBlank()) w += "ASR API URL is empty"
         if (s.llmBaseUrl.isBlank()) w += "LLM API URL is empty"
         if (s.asrApiKey.isBlank()) w += "ASR API key is empty (required to start)"
-        if (s.llmApiKey.isBlank()) w += "LLM API key is empty (required to start)"
+        if (s.llmApiKey.isBlank() && !s.asrOnlyMode) {
+            w += "LLM API key is empty (required unless ASR-only mode)"
+        }
         if (s.inputLanguage.isBlank()) w += "Input language is empty"
-        if (s.outputLanguage.isBlank()) w += "Output language is empty"
+        if (s.outputLanguage.isBlank() && !s.asrOnlyMode) w += "Output language is empty"
 
         // Sanitize / clamp for persistence
         s = s.copy(
@@ -95,6 +103,10 @@ object SettingsValidation {
             overlayMaxWidthDp = s.overlayMaxWidthDp.coerceIn(120, 2000),
             overlayMaxHeightDp = s.overlayMaxHeightDp.coerceIn(60, 800),
             overlayAlphaPercent = s.overlayAlphaPercent.coerceIn(0, 100),
+            overlayFontSizeSp = s.overlayFontSizeSp.coerceIn(10, 48),
+            liveFontSizeSp = s.liveFontSizeSp.coerceIn(10, 48),
+            overlayTextMode = OverlayTextMode.fromStorage(s.overlayTextMode).name,
+            overlayLayoutMode = OverlayLayoutMode.fromStorage(s.overlayLayoutMode).name,
             overlayBgColor = UserSettings.normalizeColorHex(
                 s.overlayBgColor, UserSettings.DEFAULT_OVERLAY_BG
             ),

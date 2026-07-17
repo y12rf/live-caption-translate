@@ -900,6 +900,11 @@ class SessionOrchestrator(
                     }
                     // ASR-first: commit EN immediately; LLM can fail independently.
                     val localId = commitSourceOnly(utt, en)
+                    if (settings.asrOnlyMode) {
+                        // Recognition only — no translation request.
+                        finishAsrOnly(localId, en)
+                        return
+                    }
                     val window = settings.contextWindowSize
                     llmQueued.incrementAndGet()
                     val sent = translateQueue.trySend(
@@ -1098,13 +1103,17 @@ class SessionOrchestrator(
             when (ev) {
                 is LlmStreamEvent.Delta -> {
                     zh += ev.text
-                    onPartial(zh)
-                    _state.update { it.copy(partialZh = zh) }
+                    val display = LlmClient.stripThinkingArtifacts(zh)
+                    onPartial(display)
+                    _state.update { it.copy(partialZh = display) }
                 }
                 is LlmStreamEvent.Completed -> {
                     if (ev.fullText.isNotEmpty()) {
-                        zh = ev.fullText
+                        zh = LlmClient.stripThinkingArtifacts(ev.fullText)
                         onPartial(zh)
+                        _state.update { it.copy(partialZh = zh) }
+                    } else {
+                        zh = LlmClient.stripThinkingArtifacts(zh)
                     }
                 }
                 is LlmStreamEvent.Error -> {
@@ -1114,10 +1123,38 @@ class SessionOrchestrator(
             }
         }
 
+        zh = LlmClient.stripThinkingArtifacts(zh)
         if (cacheKey != null && zh.isNotBlank()) {
             translationCache.put(cacheKey, zh)
         }
         finishTranslation(job, en, zh, incomplete = false)
+    }
+
+    /** Mark segment complete without translation (ASR-only mode). */
+    private fun finishAsrOnly(segmentLocalId: Long, en: String) {
+        contextWindow.addLast(ContextTurn(en, ""))
+        while (contextWindow.size > 8) contextWindow.removeFirst()
+
+        _state.update { st ->
+            val segs = st.segments.map { s ->
+                if (s.localId == segmentLocalId) {
+                    s.copy(
+                        translation = "",
+                        incomplete = false,
+                        timestampMs = System.currentTimeMillis()
+                    )
+                } else {
+                    s
+                }
+            }
+            st.copy(
+                partialEn = if (st.partialEn == en) "" else st.partialEn,
+                partialZh = "",
+                segments = segs,
+                error = null
+            )
+        }
+        // Session title uses bilingual sample — skip in ASR-only.
     }
 
     /** Commit EN immediately (incomplete until LLM fills ZH). */

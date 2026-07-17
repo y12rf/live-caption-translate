@@ -8,9 +8,15 @@ import android.media.projection.MediaProjectionManager
 import android.net.Uri
 import android.os.Build
 import android.provider.Settings
+import android.view.WindowManager
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.background
+import androidx.compose.foundation.basicMarquee
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -18,14 +24,16 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Fullscreen
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Share
-import androidx.compose.foundation.background
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.DropdownMenu
@@ -49,14 +57,15 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
-import android.view.WindowManager
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
@@ -64,12 +73,16 @@ import androidx.core.view.WindowInsetsControllerCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LifecycleEventEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import com.example.livetranslate.domain.ReprocessPhase
 import com.example.livetranslate.R
 import com.example.livetranslate.data.history.ExportTextMode
 import com.example.livetranslate.data.history.HistoryExport
+import com.example.livetranslate.data.settings.OverlayLayoutMode
+import com.example.livetranslate.data.settings.OverlayTextMode
+import com.example.livetranslate.data.settings.UserSettings
+import com.example.livetranslate.domain.ReprocessPhase
 import com.example.livetranslate.domain.model.AudioSourceType
 import com.example.livetranslate.domain.model.SessionPhase
+import com.example.livetranslate.domain.model.TranscriptSegment
 import com.example.livetranslate.service.RecordingService
 import com.example.livetranslate.service.SubtitleOverlayService
 import com.example.livetranslate.util.RecordingShareHelper
@@ -87,11 +100,16 @@ fun LiveTranslateScreen(
     val settings by viewModel.settings.collectAsStateWithLifecycle()
     val context = LocalContext.current
     val view = LocalView.current
-    val enScroll = rememberScrollState()
-    val zhScroll = rememberScrollState()
+    val pairListState = rememberLazyListState()
     var pendingStartSource by remember { mutableStateOf(AudioSourceType.Microphone) }
     var exportMenuOpen by remember { mutableStateOf(false) }
     var stopDialogOpen by remember { mutableStateOf(false) }
+    /** Full-screen bilingual-only view entered from home. */
+    var immersiveContent by remember { mutableStateOf(false) }
+
+    BackHandler(enabled = immersiveContent) {
+        immersiveContent = false
+    }
 
     // Keep screen on (Live only)
     DisposableEffect(settings.keepScreenOn) {
@@ -105,13 +123,14 @@ fun LiveTranslateScreen(
         }
     }
 
-    // Immersive system bars (Live only)
-    DisposableEffect(settings.immersiveMode) {
+    // Hide system bars in settings immersive mode OR content immersive view
+    val hideSystemBars = settings.immersiveMode || immersiveContent
+    DisposableEffect(hideSystemBars) {
         val activity = context as? Activity
         val window = activity?.window
         if (window != null) {
             val controller = WindowInsetsControllerCompat(window, view)
-            if (settings.immersiveMode) {
+            if (hideSystemBars) {
                 WindowCompat.setDecorFitsSystemWindows(window, false)
                 controller.hide(WindowInsetsCompat.Type.systemBars())
                 controller.systemBarsBehavior =
@@ -136,11 +155,13 @@ fun LiveTranslateScreen(
 
     LaunchedEffect(reprocess.lastSavedSessionId) {
         val id = reprocess.lastSavedSessionId ?: return@LaunchedEffect
+        val toastMsg = reprocess.message.takeIf { it.isNotBlank() }
+            ?: context.getString(R.string.reprocess_saved_id, id)
         viewModel.clearReprocessSaved()
         android.widget.Toast.makeText(
             context,
-            context.getString(R.string.reprocess_saved_id, id),
-            android.widget.Toast.LENGTH_SHORT
+            toastMsg,
+            android.widget.Toast.LENGTH_LONG
         ).show()
     }
 
@@ -237,7 +258,7 @@ fun LiveTranslateScreen(
             // Some providers do not support persistable grants; open stream still works now.
         }
         viewModel.startFromFile(uri)
-        // File import uses offline Re pipeline (no live subtitle stream).
+        // File import uses live VAD pipeline with timeline offsets.
         android.widget.Toast.makeText(
             context,
             context.getString(R.string.file_import_started),
@@ -287,11 +308,22 @@ fun LiveTranslateScreen(
         }
     }
 
-    LaunchedEffect(state.cumulativeEn, state.partialEn) {
-        enScroll.animateScrollTo(enScroll.maxValue)
+    LaunchedEffect(state.segments.size, state.partialEn, state.partialZh) {
+        val last = state.segments.size +
+            if (state.partialEn.isNotBlank() || state.partialZh.isNotBlank()) 1 else 0
+        if (last > 0) {
+            runCatching { pairListState.animateScrollToItem(last - 1) }
+        }
     }
-    LaunchedEffect(state.cumulativeZh, state.partialZh) {
-        zhScroll.animateScrollTo(zhScroll.maxValue)
+
+    // Full-screen immersive: bilingual content only
+    if (immersiveContent) {
+        ImmersiveBilingualView(
+            state = state,
+            settings = settings,
+            onExit = { immersiveContent = false }
+        )
+        return
     }
 
     Scaffold(
@@ -299,6 +331,12 @@ fun LiveTranslateScreen(
             TopAppBar(
                 title = { Text(stringResource(R.string.live_title)) },
                 actions = {
+                    IconButton(onClick = { immersiveContent = true }) {
+                        Icon(
+                            Icons.Default.Fullscreen,
+                            contentDescription = stringResource(R.string.immersive_enter)
+                        )
+                    }
                     IconButton(onClick = {
                         val srt = viewModel.exportSrt(ExportTextMode.Both)
                         if (srt == null) {
@@ -308,7 +346,7 @@ fun LiveTranslateScreen(
                         RecordingShareHelper.shareText(
                             context,
                             srt,
-                            chooserTitle = "分享 SRT",
+                            chooserTitle = context.getString(R.string.share_srt_chooser),
                             mimeType = "application/x-subrip"
                         )
                     }) {
@@ -572,27 +610,35 @@ fun LiveTranslateScreen(
             }
 
             Spacer(Modifier.height(8.dp))
-            Text(stringResource(R.string.live_panel_source), fontWeight = FontWeight.Bold)
-            Text(
-                text = buildDisplay(state.cumulativeEn, state.partialEn),
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Text(
+                    stringResource(R.string.live_panel_bilingual),
+                    fontWeight = FontWeight.Bold
+                )
+                TextButton(onClick = { immersiveContent = true }) {
+                    Text(stringResource(R.string.immersive_enter))
+                }
+            }
+            if (settings.asrOnlyMode) {
+                Text(
+                    stringResource(R.string.asr_only_banner),
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.tertiary
+                )
+            }
+            BilingualPairList(
+                segments = state.segments,
+                partialEn = state.partialEn,
+                partialZh = state.partialZh,
+                settings = settings,
+                listState = pairListState,
                 modifier = Modifier
                     .weight(1f)
                     .fillMaxWidth()
-                    .verticalScroll(enScroll)
-                    .padding(vertical = 4.dp),
-                style = MaterialTheme.typography.bodyLarge
-            )
-
-            Spacer(Modifier.height(8.dp))
-            Text(stringResource(R.string.live_panel_translation), fontWeight = FontWeight.Bold)
-            Text(
-                text = buildDisplay(state.cumulativeZh, state.partialZh),
-                modifier = Modifier
-                    .weight(1f)
-                    .fillMaxWidth()
-                    .verticalScroll(zhScroll)
-                    .padding(vertical = 4.dp),
-                style = MaterialTheme.typography.bodyLarge
             )
 
             state.error?.let { err ->
@@ -602,7 +648,7 @@ fun LiveTranslateScreen(
             if (state.canRetrySave) {
                 Spacer(Modifier.height(4.dp))
                 Text(
-                    state.saveError ?: "保存失败",
+                    state.saveError ?: context.getString(R.string.save_failed_generic),
                     color = MaterialTheme.colorScheme.error
                 )
                 OutlinedButton(onClick = viewModel::retrySave) {
@@ -717,8 +763,7 @@ fun LiveTranslateScreen(
                 ) { Text(stringResource(R.string.pause)) }
                 OutlinedButton(
                     onClick = {
-                        if (reprocessBusy || state.audioSource == AudioSourceType.File) {
-                            // Offline file / reprocess: cancel without drain dialog
+                        if (reprocessBusy) {
                             viewModel.stop(drain = false)
                             android.widget.Toast.makeText(
                                 context,
@@ -726,6 +771,7 @@ fun LiveTranslateScreen(
                                 android.widget.Toast.LENGTH_SHORT
                             ).show()
                         } else {
+                            // File uses same live pipeline — show drain dialog
                             stopDialogOpen = true
                         }
                     },
@@ -751,7 +797,7 @@ private fun beginCapture(
             if (resultCode == null || data == null) {
                 android.widget.Toast.makeText(
                     context,
-                    "内部录音缺少系统授权结果，请重新点 Start 并允许录制",
+                    context.getString(R.string.projection_missing_result),
                     android.widget.Toast.LENGTH_LONG
                 ).show()
                 return
@@ -766,7 +812,7 @@ private fun beginCapture(
     } catch (e: Exception) {
         android.widget.Toast.makeText(
             context,
-            e.message ?: "启动录音失败",
+            e.message ?: context.getString(R.string.recording_start_failed),
             android.widget.Toast.LENGTH_LONG
         ).show()
     }
@@ -786,5 +832,203 @@ internal fun buildDisplay(cumulative: String, partial: String): String {
         // Already committed as last line / whole buffer
         c == p || c.endsWith("\n$p") -> c
         else -> "$c\n$p"
+    }
+}
+
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun BilingualPairList(
+    segments: List<TranscriptSegment>,
+    partialEn: String,
+    partialZh: String,
+    settings: UserSettings,
+    listState: androidx.compose.foundation.lazy.LazyListState,
+    modifier: Modifier = Modifier
+) {
+    val fontSp = settings.liveFontSizeSp.coerceIn(10, 48).sp
+    val textMode = settings.overlayTextModeEnum()
+    val showSource = textMode != OverlayTextMode.TranslationOnly
+    val showTranslation = textMode != OverlayTextMode.SourceOnly && !settings.asrOnlyMode
+    // In ASR-only always show source even if text mode was translation-only
+    val effectiveShowSource = showSource || settings.asrOnlyMode
+    val effectiveShowZh = showTranslation && !settings.asrOnlyMode
+
+    LazyColumn(
+        state = listState,
+        modifier = modifier,
+        verticalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+        items(segments, key = { it.localId }) { seg ->
+            BilingualPairItem(
+                source = seg.source,
+                translation = seg.translation,
+                showSource = effectiveShowSource,
+                showTranslation = effectiveShowZh,
+                incomplete = seg.incomplete,
+                fontSp = fontSp,
+                layout = settings.overlayLayoutModeEnum()
+            )
+        }
+        val pEn = partialEn.trim()
+        val pZh = partialZh.trim()
+        if (pEn.isNotEmpty() || pZh.isNotEmpty()) {
+            item(key = "partial") {
+                BilingualPairItem(
+                    source = pEn,
+                    translation = pZh,
+                    showSource = effectiveShowSource,
+                    showTranslation = effectiveShowZh,
+                    incomplete = true,
+                    fontSp = fontSp,
+                    layout = settings.overlayLayoutModeEnum()
+                )
+            }
+        }
+        if (segments.isEmpty() && pEn.isEmpty() && pZh.isEmpty()) {
+            item(key = "empty") {
+                Text(
+                    text = "…",
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(24.dp),
+                    textAlign = TextAlign.Center,
+                    style = MaterialTheme.typography.bodyLarge,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun BilingualPairItem(
+    source: String,
+    translation: String,
+    showSource: Boolean,
+    showTranslation: Boolean,
+    incomplete: Boolean,
+    fontSp: androidx.compose.ui.unit.TextUnit,
+    layout: OverlayLayoutMode
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 4.dp, vertical = 2.dp),
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        if (showSource && source.isNotBlank()) {
+            CaptionLine(
+                text = source,
+                fontSp = fontSp,
+                layout = layout,
+                color = MaterialTheme.colorScheme.onSurface,
+                fontWeight = FontWeight.Normal
+            )
+        }
+        if (showTranslation && translation.isNotBlank()) {
+            if (showSource && source.isNotBlank()) {
+                Spacer(Modifier.height(4.dp))
+            }
+            CaptionLine(
+                text = translation,
+                fontSp = fontSp,
+                layout = layout,
+                color = MaterialTheme.colorScheme.primary,
+                fontWeight = FontWeight.Medium
+            )
+        }
+        if (incomplete && translation.isBlank() && showTranslation) {
+            Spacer(Modifier.height(2.dp))
+            Text(
+                text = stringResource(R.string.segment_incomplete),
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.outline,
+                textAlign = TextAlign.Center,
+                modifier = Modifier.fillMaxWidth()
+            )
+        }
+    }
+}
+
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun CaptionLine(
+    text: String,
+    fontSp: androidx.compose.ui.unit.TextUnit,
+    layout: OverlayLayoutMode,
+    color: androidx.compose.ui.graphics.Color,
+    fontWeight: FontWeight
+) {
+    when (layout) {
+        OverlayLayoutMode.FullSentence -> {
+            Text(
+                text = text,
+                modifier = Modifier.fillMaxWidth(),
+                textAlign = TextAlign.Center,
+                fontSize = fontSp,
+                color = color,
+                fontWeight = fontWeight,
+                lineHeight = fontSp * 1.35f
+            )
+        }
+        OverlayLayoutMode.ScrollLine -> {
+            Text(
+                text = text,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .basicMarquee(iterations = Int.MAX_VALUE),
+                textAlign = TextAlign.Center,
+                fontSize = fontSp,
+                color = color,
+                fontWeight = fontWeight,
+                maxLines = 1
+            )
+        }
+    }
+}
+
+/**
+ * Immersive mode: only bilingual captions (no chrome / controls).
+ * Tap close or system back to exit.
+ */
+@Composable
+private fun ImmersiveBilingualView(
+    state: com.example.livetranslate.domain.LiveSessionUiState,
+    settings: UserSettings,
+    onExit: () -> Unit
+) {
+    val listState = rememberLazyListState()
+    LaunchedEffect(state.segments.size, state.partialEn, state.partialZh) {
+        val last = state.segments.size +
+            if (state.partialEn.isNotBlank() || state.partialZh.isNotBlank()) 1 else 0
+        if (last > 0) runCatching { listState.animateScrollToItem(last - 1) }
+    }
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(MaterialTheme.colorScheme.background)
+    ) {
+        BilingualPairList(
+            segments = state.segments,
+            partialEn = state.partialEn,
+            partialZh = state.partialZh,
+            settings = settings,
+            listState = listState,
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(horizontal = 20.dp, vertical = 48.dp)
+        )
+        IconButton(
+            onClick = onExit,
+            modifier = Modifier
+                .align(Alignment.TopEnd)
+                .padding(8.dp)
+        ) {
+            Icon(
+                Icons.Default.Close,
+                contentDescription = stringResource(R.string.immersive_exit)
+            )
+        }
     }
 }

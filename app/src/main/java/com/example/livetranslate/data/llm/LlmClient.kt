@@ -71,21 +71,23 @@ class LlmClient(
         }
 
         // Build JSON as string (avoids Android JSONObject unit-test stubs).
+        // `thinking` is appended after messages (not before) — common OpenAI-compat layout.
         val bodyJson = buildString {
             append('{')
             append("\"model\":\"").append(JsonLite.escape(config.model)).append("\",")
             append("\"stream\":true,")
-            when (config.thinking) {
-                LlmThinkingMode.Default -> { /* omit thinking field */ }
-                LlmThinkingMode.True -> append("\"thinking\":true,")
-                LlmThinkingMode.False -> append("\"thinking\":false,")
-            }
             append("\"messages\":[")
             append("{\"role\":\"system\",\"content\":\"")
                 .append(JsonLite.escape(system)).append("\"},")
             append("{\"role\":\"user\",\"content\":\"")
                 .append(JsonLite.escape(user)).append("\"}")
-            append("]}")
+            append(']')
+            when (config.thinking) {
+                LlmThinkingMode.Default -> { /* omit thinking field */ }
+                LlmThinkingMode.True -> append(",\"thinking\":true")
+                LlmThinkingMode.False -> append(",\"thinking\":false")
+            }
+            append('}')
         }
 
         val keyPreview = config.apiKey.trim().let { k ->
@@ -137,7 +139,8 @@ class LlmClient(
                 acc.append(piece)
                 trySend(LlmStreamEvent.Delta(piece))
             }
-            trySend(LlmStreamEvent.Completed(acc.toString()))
+            // Strip residual thinking wrappers that may span multiple deltas.
+            trySend(LlmStreamEvent.Completed(stripThinkingArtifacts(acc.toString())))
             response.close()
             close()
         } catch (e: Exception) {
@@ -174,17 +177,18 @@ class LlmClient(
             append('{')
             append("\"model\":\"").append(JsonLite.escape(config.model)).append("\",")
             append("\"stream\":false,")
-            when (config.thinking) {
-                LlmThinkingMode.Default -> { }
-                LlmThinkingMode.True -> append("\"thinking\":true,")
-                LlmThinkingMode.False -> append("\"thinking\":false,")
-            }
             append("\"messages\":[")
             append("{\"role\":\"system\",\"content\":\"")
                 .append(JsonLite.escape(systemPrompt)).append("\"},")
             append("{\"role\":\"user\",\"content\":\"")
                 .append(JsonLite.escape(userPrompt)).append("\"}")
-            append("]}")
+            append(']')
+            when (config.thinking) {
+                LlmThinkingMode.Default -> { }
+                LlmThinkingMode.True -> append(",\"thinking\":true")
+                LlmThinkingMode.False -> append(",\"thinking\":false")
+            }
+            append('}')
         }
         val request = Request.Builder()
             .url(url)
@@ -198,8 +202,9 @@ class LlmClient(
             if (!response.isSuccessful) {
                 throw IOException("LLM HTTP ${response.code}: ${body.take(300)}")
             }
-            // Prefer message.content; fall back to any content string
-            JsonLite.firstStringField(body, "content")?.trim().orEmpty()
+            // Prefer message.content (not nested thinking.content)
+            val raw = extractMessageContent(body) ?: ""
+            stripThinkingArtifacts(raw).trim()
         }
     }
 
@@ -224,13 +229,40 @@ class LlmClient(
         return sanitizeTitle(raw)
     }
 
+    /**
+     * Extract assistant text from an SSE chunk.
+     *
+     * Prefers `choices[].delta.content` and **ignores** thinking / reasoning fields
+     * (`reasoning_content`, `thinking`, nested `thinking.content`) so chain-of-thought
+     * is never concatenated into the translation stream.
+     */
     internal fun extractDeltaContent(payload: String): String? {
         return try {
-            // Prefer nested delta.content; fall back to any "content" string field.
-            JsonLite.firstStringField(payload, "content")
+            val deltaBody = extractObjectAfterKey(payload, "delta") ?: return null
+            // Explicit null content (common while only reasoning streams)
+            if (Regex("\"content\"\\s*:\\s*null").containsMatchIn(deltaBody)) {
+                return null
+            }
+            val content = extractTopLevelStringField(deltaBody, "content") ?: return null
+            // Do not strip mid-stream (tags may span chunks); only emit raw content piece.
+            // Final [Completed] runs stripThinkingArtifacts on the full buffer.
+            content.takeIf { it.isNotEmpty() }
         } catch (_: Exception) {
             null
         }
+    }
+
+    /**
+     * Non-stream response: prefer `message.content` over any nested thinking content.
+     */
+    internal fun extractMessageContent(body: String): String? {
+        val messageBody = extractObjectAfterKey(body, "message")
+        if (messageBody != null) {
+            extractTopLevelStringField(messageBody, "content")?.let { return it }
+        }
+        // Fallback: first top-level-ish content (still better than nested thinking)
+        return extractTopLevelStringField(body, "content")
+            ?: JsonLite.firstStringField(body, "content")
     }
 
     companion object {
@@ -238,8 +270,147 @@ class LlmClient(
         private const val TITLE_TURN_SAMPLE = 10
         private const val TITLE_MAX_CHARS = 40
 
+        /**
+         * First balanced `{...}` value after `"key":`.
+         * Used to scope field lookups to `delta` / `message` objects.
+         */
+        internal fun extractObjectAfterKey(json: String, key: String): String? {
+            val keyPat = Regex("\"${Regex.escape(key)}\"\\s*:\\s*\\{")
+            val m = keyPat.find(json) ?: return null
+            val start = m.range.last // index of '{'
+            var depth = 0
+            var i = start
+            var inString = false
+            var escape = false
+            while (i < json.length) {
+                val c = json[i]
+                if (inString) {
+                    when {
+                        escape -> escape = false
+                        c == '\\' -> escape = true
+                        c == '"' -> inString = false
+                    }
+                } else {
+                    when (c) {
+                        '"' -> inString = true
+                        '{' -> depth++
+                        '}' -> {
+                            depth--
+                            if (depth == 0) {
+                                // exclude surrounding braces
+                                return json.substring(start + 1, i)
+                            }
+                        }
+                    }
+                }
+                i++
+            }
+            return null
+        }
+
+        /**
+         * String field at the **current object depth only** (does not enter nested `{}`).
+         * Avoids matching `"content"` inside `"thinking":{"content":"..."}`.
+         */
+        internal fun extractTopLevelStringField(objectBody: String, key: String): String? {
+            var depth = 0
+            var i = 0
+            var inString = false
+            var escape = false
+            val keyNeedle = "\"$key\""
+            while (i < objectBody.length) {
+                val c = objectBody[i]
+                if (inString) {
+                    when {
+                        escape -> escape = false
+                        c == '\\' -> escape = true
+                        c == '"' -> inString = false
+                    }
+                    i++
+                    continue
+                }
+                when (c) {
+                    '"' -> {
+                        // candidate key at depth 0
+                        if (depth == 0 && objectBody.startsWith(keyNeedle, i)) {
+                            val afterKey = i + keyNeedle.length
+                            val rest = objectBody.substring(afterKey)
+                            val colon = Regex("^\\s*:\\s*\"").find(rest)
+                            if (colon != null) {
+                                val valueStart = afterKey + colon.range.last + 1
+                                val value = readJsonString(objectBody, valueStart) ?: return null
+                                return value
+                            }
+                        }
+                        inString = true
+                        i++
+                    }
+                    '{' -> {
+                        depth++
+                        i++
+                    }
+                    '}' -> {
+                        depth--
+                        i++
+                    }
+                    else -> i++
+                }
+            }
+            return null
+        }
+
+        /** Read a JSON string starting at [start] (first char after opening quote). */
+        private fun readJsonString(s: String, start: Int): String? {
+            val out = StringBuilder()
+            var i = start
+            while (i < s.length) {
+                val c = s[i]
+                if (c == '\\' && i + 1 < s.length) {
+                    when (s[i + 1]) {
+                        'n' -> out.append('\n')
+                        'r' -> out.append('\r')
+                        't' -> out.append('\t')
+                        '"' -> out.append('"')
+                        '\\' -> out.append('\\')
+                        'u' -> {
+                            if (i + 5 < s.length) {
+                                out.append(s.substring(i + 2, i + 6).toInt(16).toChar())
+                                i += 6
+                                continue
+                            }
+                            out.append('u')
+                        }
+                        else -> out.append(s[i + 1])
+                    }
+                    i += 2
+                    continue
+                }
+                if (c == '"') return out.toString()
+                out.append(c)
+                i++
+            }
+            return null
+        }
+
+        /**
+         * Remove chain-of-thought wrappers that some models still put in `content`.
+         * Also drops leading `reasoning` / `thinking` fence blocks.
+         */
+        fun stripThinkingArtifacts(raw: String): String {
+            var t = raw
+            // <think>...</think> and <thinking>...</thinking> (greedy multi-block)
+            t = t.replace(Regex("(?is)<think\\b[^>]*>.*?</think>"), "")
+            t = t.replace(Regex("(?is)<thinking\\b[^>]*>.*?</thinking>"), "")
+            // Unclosed think tag at start → drop until end tag or whole prefix
+            t = t.replace(Regex("(?is)^\\s*<think\\b[^>]*>.*"), "")
+            t = t.replace(Regex("(?is)^\\s*<thinking\\b[^>]*>.*"), "")
+            // Markdown-style fences some gateways emit
+            t = t.replace(Regex("(?is)```(?:thinking|reasoning)\\s*.*?```"), "")
+            return t.trim()
+        }
+
         fun sanitizeTitle(raw: String): String {
-            var t = raw.trim()
+            var t = stripThinkingArtifacts(raw).trim()
                 .lineSequence()
                 .firstOrNull { it.isNotBlank() }
                 .orEmpty()

@@ -48,6 +48,7 @@ class SettingsRepository(private val context: Context) {
         val translationCacheMax = intPreferencesKey("translation_cache_max")
         val keepScreenOn = booleanPreferencesKey("keep_screen_on")
         val immersiveMode = booleanPreferencesKey("immersive_mode")
+        val asrOnlyMode = booleanPreferencesKey("asr_only_mode")
         val overlayMaxWidthDp = intPreferencesKey("overlay_max_width_dp")
         val overlayMaxHeightDp = intPreferencesKey("overlay_max_height_dp")
         val overlayAlphaPercent = intPreferencesKey("overlay_alpha_percent")
@@ -55,6 +56,10 @@ class SettingsRepository(private val context: Context) {
         val overlayEnTextColor = stringPreferencesKey("overlay_en_text_color")
         val overlayZhTextColor = stringPreferencesKey("overlay_zh_text_color")
         val overlayTranslationOnTop = booleanPreferencesKey("overlay_translation_on_top")
+        val overlayTextMode = stringPreferencesKey("overlay_text_mode")
+        val overlayLayoutMode = stringPreferencesKey("overlay_layout_mode")
+        val overlayFontSizeSp = intPreferencesKey("overlay_font_size_sp")
+        val liveFontSizeSp = intPreferencesKey("live_font_size_sp")
     }
 
     val settings: Flow<UserSettings> = context.dataStore.data.map { p -> read(p) }
@@ -97,6 +102,7 @@ class SettingsRepository(private val context: Context) {
             translationCacheMax = p[Keys.translationCacheMax] ?: d.translationCacheMax,
             keepScreenOn = p[Keys.keepScreenOn] ?: d.keepScreenOn,
             immersiveMode = p[Keys.immersiveMode] ?: d.immersiveMode,
+            asrOnlyMode = p[Keys.asrOnlyMode] ?: d.asrOnlyMode,
             overlayMaxWidthDp = p[Keys.overlayMaxWidthDp] ?: d.overlayMaxWidthDp,
             overlayMaxHeightDp = p[Keys.overlayMaxHeightDp] ?: d.overlayMaxHeightDp,
             overlayAlphaPercent = p[Keys.overlayAlphaPercent] ?: d.overlayAlphaPercent,
@@ -104,7 +110,11 @@ class SettingsRepository(private val context: Context) {
             overlayEnTextColor = p[Keys.overlayEnTextColor] ?: d.overlayEnTextColor,
             overlayZhTextColor = p[Keys.overlayZhTextColor] ?: d.overlayZhTextColor,
             overlayTranslationOnTop = p[Keys.overlayTranslationOnTop]
-                ?: d.overlayTranslationOnTop
+                ?: d.overlayTranslationOnTop,
+            overlayTextMode = p[Keys.overlayTextMode] ?: d.overlayTextMode,
+            overlayLayoutMode = p[Keys.overlayLayoutMode] ?: d.overlayLayoutMode,
+            overlayFontSizeSp = p[Keys.overlayFontSizeSp] ?: d.overlayFontSizeSp,
+            liveFontSizeSp = p[Keys.liveFontSizeSp] ?: d.liveFontSizeSp
         )
     }
 
@@ -139,6 +149,7 @@ class SettingsRepository(private val context: Context) {
         prefs[Keys.translationCacheMax] = next.translationCacheMax
         prefs[Keys.keepScreenOn] = next.keepScreenOn
         prefs[Keys.immersiveMode] = next.immersiveMode
+        prefs[Keys.asrOnlyMode] = next.asrOnlyMode
         prefs[Keys.overlayMaxWidthDp] = next.overlayMaxWidthDp
         prefs[Keys.overlayMaxHeightDp] = next.overlayMaxHeightDp
         prefs[Keys.overlayAlphaPercent] = next.overlayAlphaPercent
@@ -146,5 +157,9 @@ class SettingsRepository(private val context: Context) {
         prefs[Keys.overlayEnTextColor] = next.overlayEnTextColor
         prefs[Keys.overlayZhTextColor] = next.overlayZhTextColor
         prefs[Keys.overlayTranslationOnTop] = next.overlayTranslationOnTop
+        prefs[Keys.overlayTextMode] = OverlayTextMode.fromStorage(next.overlayTextMode).name
+        prefs[Keys.overlayLayoutMode] = OverlayLayoutMode.fromStorage(next.overlayLayoutMode).name
+        prefs[Keys.overlayFontSizeSp] = next.overlayFontSizeSp
+        prefs[Keys.liveFontSizeSp] = next.liveFontSizeSp
     }
 }

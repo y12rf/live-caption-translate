@@ -58,13 +58,14 @@ class LiveTranslateViewModel(
     }
 
     /**
-     * File source: offline Re channel (FFmpeg → chunk ASR → punctuation → translate →
-     * LLM title when ≥10 turns → save). Does not use live VAD queues.
+     * File source: live recording pipeline with timeline offsets
+     * (FFmpeg → energy VAD → same ASR/LLM queues as mic/internal).
+     * Orphan recovery still uses [OfflineReprocessPipeline].
      */
     fun startFromFile(uri: Uri) {
         _orphanPrompt.value = null
         controller.setAudioSource(AudioSourceType.File)
-        reprocess.startFromUri(uri)
+        controller.startFromFile(uri)
     }
 
     fun pause() = controller.pause()

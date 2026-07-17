@@ -86,6 +86,10 @@ class LlmClientTest {
             assertEquals("/custom/llm", req.path)
             val body = req.body.readUtf8()
             assertTrue(body.contains("\"thinking\":true"))
+            // thinking must appear after messages (not before)
+            val msgIdx = body.indexOf("\"messages\"")
+            val thinkIdx = body.indexOf("\"thinking\"")
+            assertTrue(msgIdx >= 0 && thinkIdx > msgIdx)
         } finally {
             server.shutdown()
         }
@@ -118,8 +122,44 @@ class LlmClientTest {
             ).toList()
             val body = server.takeRequest().body.readUtf8()
             assertTrue(body.contains("\"thinking\":false"))
+            val msgIdx = body.indexOf("\"messages\"")
+            val thinkIdx = body.indexOf("\"thinking\"")
+            assertTrue(msgIdx >= 0 && thinkIdx > msgIdx)
         } finally {
             server.shutdown()
         }
+    }
+
+    @Test
+    fun extractDelta_ignoresThinkingNestedContent() {
+        val client = LlmClient(OkHttpClient())
+        // Nested thinking.content must NOT be picked as the translation delta
+        val payload =
+            """{"choices":[{"delta":{"thinking":{"content":"reason..."},"content":"你好"}}]}"""
+        assertEquals("你好", client.extractDeltaContent(payload))
+    }
+
+    @Test
+    fun extractDelta_ignoresReasoningContentField() {
+        val client = LlmClient(OkHttpClient())
+        val onlyReasoning =
+            """{"choices":[{"delta":{"reasoning_content":"let me think","content":null}}]}"""
+        assertEquals(null, client.extractDeltaContent(onlyReasoning))
+
+        val both =
+            """{"choices":[{"delta":{"reasoning_content":"think","content":"译文"}}]}"""
+        assertEquals("译文", client.extractDeltaContent(both))
+    }
+
+    @Test
+    fun stripThinkingArtifacts_removesThinkTags() {
+        assertEquals(
+            "最终译文",
+            LlmClient.stripThinkingArtifacts("<think>internal</think>最终译文")
+        )
+        assertEquals(
+            "ok",
+            LlmClient.stripThinkingArtifacts("<thinking>x</thinking>ok")
+        )
     }
 }

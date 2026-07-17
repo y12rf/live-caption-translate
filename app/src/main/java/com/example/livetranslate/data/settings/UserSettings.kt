@@ -60,8 +60,16 @@ data class UserSettings(
     val translationCacheMax: Int = 50,
     /** Keep screen awake on Live screen. */
     val keepScreenOn: Boolean = false,
-    /** Hide system bars on Live screen (swipe to show transiently). */
+    /**
+     * When true (default entry from Live), hide system bars.
+     * Immersive content view is entered via Live home button; this still controls bars.
+     */
     val immersiveMode: Boolean = false,
+    /**
+     * ASR-only session: recognize speech but skip LLM translation.
+     * Segments keep source text; translation stays empty.
+     */
+    val asrOnlyMode: Boolean = false,
     // Floating subtitle overlay
     /** Max width in dp (clamped to screen). */
     val overlayMaxWidthDp: Int = 360,
@@ -80,7 +88,21 @@ data class UserSettings(
      * true  = translation (ZH) on top, original (EN) below (default)
      * false = original on top, translation below
      */
-    val overlayTranslationOnTop: Boolean = true
+    val overlayTranslationOnTop: Boolean = true,
+    /**
+     * Subtitle lines: both / source only / translation only.
+     * Stored as [OverlayTextMode] name.
+     */
+    val overlayTextMode: String = OverlayTextMode.Both.name,
+    /**
+     * Caption layout: full sentence (center) or single-line marquee.
+     * Stored as [OverlayLayoutMode] name.
+     */
+    val overlayLayoutMode: String = OverlayLayoutMode.FullSentence.name,
+    /** Overlay caption text size in sp (10–48). */
+    val overlayFontSizeSp: Int = DEFAULT_OVERLAY_FONT_SP,
+    /** Live home bilingual panel text size in sp (10–48). */
+    val liveFontSizeSp: Int = DEFAULT_LIVE_FONT_SP
 ) {
     fun normalizedAsrBaseUrl(): String = normalizeBaseUrl(asrBaseUrl)
     fun normalizedLlmBaseUrl(): String = normalizeBaseUrl(llmBaseUrl)
@@ -95,6 +117,10 @@ data class UserSettings(
         runCatching { ApiAuthStyle.valueOf(llmAuthStyle) }.getOrDefault(ApiAuthStyle.Bearer)
 
     fun llmThinkingMode(): LlmThinkingMode = LlmThinkingMode.fromStorage(llmThinking)
+
+    fun overlayTextModeEnum(): OverlayTextMode = OverlayTextMode.fromStorage(overlayTextMode)
+
+    fun overlayLayoutModeEnum(): OverlayLayoutMode = OverlayLayoutMode.fromStorage(overlayLayoutMode)
 
     fun renderLlmSystemPrompt(): String =
         llmSystemPrompt
@@ -111,6 +137,14 @@ data class UserSettings(
         const val DEFAULT_OVERLAY_BG = "#000000"
         const val DEFAULT_OVERLAY_EN = "#FFFFFF"
         const val DEFAULT_OVERLAY_ZH = "#FFEB3B"
+        const val DEFAULT_OVERLAY_FONT_SP = 16
+        const val DEFAULT_LIVE_FONT_SP = 16
+        const val DEFAULT_OVERLAY_WIDTH_DP = 360
+        const val DEFAULT_OVERLAY_HEIGHT_DP = 140
+        const val DEFAULT_OVERLAY_ALPHA = 80
+
+        /** Reset caption-related fields (overlay + live font) to defaults. */
+        fun captionDefaults(): UserSettings = UserSettings()
 
         fun normalizeBaseUrl(url: String): String = url.trim().trimEnd('/')
 

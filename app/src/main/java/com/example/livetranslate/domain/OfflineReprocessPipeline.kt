@@ -12,6 +12,7 @@ import com.example.livetranslate.data.audio.WavChunker
 import com.example.livetranslate.data.history.HistoryRepository
 import com.example.livetranslate.data.llm.LlmClient
 import com.example.livetranslate.data.llm.LlmConfig
+import com.example.livetranslate.data.network.NetworkErrors
 import com.example.livetranslate.data.network.NetworkMonitor
 import com.example.livetranslate.data.settings.SettingsRepository
 import com.example.livetranslate.data.settings.UserSettings
@@ -75,7 +76,11 @@ data class ReprocessUiState(
 
 /**
  * Offline full-session path: chunked ASR → punctuation split → sequential LLM → Room.
- * Used by history re-run, orphan recovery, and home **file** import.
+ * Used by history re-run, orphan recovery (and legacy file import).
+ *
+ * **Fault tolerance**: after per-item retries, ASR/LLM failures soft-skip so partial
+ * results are still saved (mirrors live ASR-first / incomplete segments). Only aborts
+ * when there is no usable text at all, or on cancel / fatal I/O.
  */
 class OfflineReprocessPipeline(
     private val appContext: Context,
@@ -292,6 +297,8 @@ class OfflineReprocessPipeline(
 
         checkCancel()
         val asrParts = ArrayList<String>(chunks.size)
+        var asrSkipped = 0
+        var lastAsrSkipReason: String? = null
         for (chunk in chunks) {
             checkCancel()
             _state.update {
@@ -301,18 +308,46 @@ class OfflineReprocessPipeline(
                     message = str(R.string.offline_asr_progress, chunk.index + 1, chunk.total)
                 )
             }
-            val text = transcribeWithRetry(chunk, settings)
-            if (text.isNotBlank()) asrParts.add(text)
+            when (val outcome = transcribeSoft(chunk, settings)) {
+                is SoftAsr.Ok -> {
+                    if (outcome.text.isNotBlank()) asrParts.add(outcome.text)
+                    // blank ASR (noise) is soft-skipped without counting as failure
+                }
+                is SoftAsr.Skip -> {
+                    asrSkipped++
+                    lastAsrSkipReason = outcome.reason
+                    android.util.Log.w(
+                        TAG,
+                        "ASR chunk ${chunk.index + 1}/${chunk.total} skipped: ${outcome.reason}"
+                    )
+                    _state.update {
+                        it.copy(
+                            message = str(
+                                R.string.offline_asr_chunk_skip,
+                                chunk.index + 1,
+                                chunk.total,
+                                outcome.reason.take(80)
+                            )
+                        )
+                    }
+                }
+            }
         }
 
         val fullText = asrParts.joinToString(" ").trim()
         if (fullText.isBlank()) {
-            throw Exception(str(R.string.offline_asr_empty))
+            val hint = lastAsrSkipReason?.let { " ($it)" }.orEmpty()
+            throw Exception(str(R.string.offline_asr_empty) + hint)
         }
 
-        val sentences = PunctuationSegmenter.split(fullText)
+        // Fallback: no punctuation breaks → treat whole transcript as one segment
+        var sentences = PunctuationSegmenter.split(fullText)
         if (sentences.isEmpty()) {
-            throw Exception(str(R.string.offline_split_empty))
+            sentences = listOf(fullText)
+            android.util.Log.w(TAG, "punctuation split empty; using full text as one sentence")
+            _state.update {
+                it.copy(message = str(R.string.offline_split_fallback))
+            }
         }
 
         checkCancel()
@@ -320,29 +355,76 @@ class OfflineReprocessPipeline(
         val windowSize = settings.contextWindowSize.coerceAtLeast(0)
         val segments = ArrayList<TranscriptSegment>(sentences.size)
         val startedAt = startedAtOverride ?: System.currentTimeMillis()
+        var translateIncomplete = 0
 
         for ((idx, sentence) in sentences.withIndex()) {
             checkCancel()
-            _state.update {
-                it.copy(
-                    translateIndex = idx + 1,
-                    translateTotal = sentences.size,
-                    message = str(R.string.offline_translate_progress, idx + 1, sentences.size)
-                )
+            val source = sentence.trim()
+            if (source.isEmpty()) continue
+
+            val (zh, incomplete) = if (settings.asrOnlyMode) {
+                _state.update {
+                    it.copy(
+                        translateIndex = idx + 1,
+                        translateTotal = sentences.size,
+                        message = str(R.string.offline_asr_progress, idx + 1, sentences.size)
+                    )
+                }
+                "" to false
+            } else {
+                _state.update {
+                    it.copy(
+                        translateIndex = idx + 1,
+                        translateTotal = sentences.size,
+                        message = str(
+                            R.string.offline_translate_progress,
+                            idx + 1,
+                            sentences.size
+                        )
+                    )
+                }
+                when (val outcome = translateSoft(source, window.toList(), settings)) {
+                    is SoftZh.Ok -> outcome.text to false
+                    is SoftZh.Incomplete -> {
+                        translateIncomplete++
+                        android.util.Log.w(
+                            TAG,
+                            "translate soft-fail sentence ${idx + 1}: ${outcome.reason}"
+                        )
+                        _state.update {
+                            it.copy(
+                                message = str(
+                                    R.string.offline_translate_skip,
+                                    idx + 1,
+                                    outcome.reason.take(80)
+                                )
+                            )
+                        }
+                        "" to true
+                    }
+                }
             }
-            val zh = translateWithRetry(sentence, window.toList(), settings)
             segments.add(
                 TranscriptSegment(
-                    source = sentence,
+                    source = source,
                     translation = zh,
                     cutReason = CutReason.Silence,
-                    incomplete = false,
+                    incomplete = incomplete,
                     timestampMs = System.currentTimeMillis(),
+                    // Prefer chunk-level offset when single-sentence; reprocess is
+                    // punctuation-based so offsets stay 0 (design).
                     offsetMs = 0L
                 )
             )
-            window.addLast(ContextTurn(sentence, zh))
-            while (window.size > windowSize) window.removeFirst()
+            // Only feed successful pairs into context (avoid poisoning glossary/context)
+            if (!incomplete && zh.isNotBlank()) {
+                window.addLast(ContextTurn(source, zh))
+                while (window.size > windowSize) window.removeFirst()
+            }
+        }
+
+        if (segments.isEmpty()) {
+            throw Exception(str(R.string.offline_split_empty))
         }
 
         checkCancel()
@@ -351,17 +433,36 @@ class OfflineReprocessPipeline(
             it.copy(message = str(R.string.offline_saving), sessionTitle = title)
         }
         val endedAt = System.currentTimeMillis()
-        val id = history.saveSession(
-            startedAt = startedAt,
-            endedAt = endedAt,
-            segments = segments,
-            audioPath = audioPath,
-            title = title
-        )
+        val id = try {
+            history.saveSession(
+                startedAt = startedAt,
+                endedAt = endedAt,
+                segments = segments,
+                audioPath = audioPath,
+                title = title
+            )
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            android.util.Log.e(TAG, "saveSession failed", e)
+            throw Exception(
+                str(R.string.offline_save_fail, e.message ?: e.javaClass.simpleName)
+            )
+        }
 
+        val savedMsg = if (asrSkipped > 0 || translateIncomplete > 0) {
+            str(
+                R.string.offline_saved_partial,
+                title,
+                asrSkipped,
+                translateIncomplete
+            )
+        } else {
+            str(R.string.offline_saved, title)
+        }
         _state.value = ReprocessUiState(
             phase = ReprocessPhase.Idle,
-            message = str(R.string.offline_saved, title),
+            message = savedMsg,
             lastSavedSessionId = id,
             sessionTitle = title
         )
@@ -468,7 +569,7 @@ class OfflineReprocessPipeline(
         if (settings.asrApiKey.isBlank()) {
             throw Exception(str(R.string.asr_key_empty))
         }
-        if (settings.llmApiKey.isBlank()) {
+        if (!settings.asrOnlyMode && settings.llmApiKey.isBlank()) {
             throw Exception(str(R.string.llm_key_empty))
         }
     }
@@ -479,10 +580,23 @@ class OfflineReprocessPipeline(
         }
     }
 
-    private suspend fun transcribeWithRetry(
+    private sealed class SoftAsr {
+        data class Ok(val text: String) : SoftAsr()
+        data class Skip(val reason: String) : SoftAsr()
+    }
+
+    private sealed class SoftZh {
+        data class Ok(val text: String) : SoftZh()
+        data class Incomplete(val reason: String) : SoftZh()
+    }
+
+    /**
+     * ASR with retries; on exhaustion returns [SoftAsr.Skip] instead of aborting the job.
+     */
+    private suspend fun transcribeSoft(
         chunk: WavChunker.PcmChunk,
         settings: UserSettings
-    ): String {
+    ): SoftAsr {
         val maxAttempts = settings.maxNetworkAttempts.coerceIn(1, 10)
         var attempt = 0
         var last: Exception? = null
@@ -490,7 +604,7 @@ class OfflineReprocessPipeline(
             checkCancel()
             try {
                 awaitOnline()
-                return runAsr(chunk, settings)
+                return SoftAsr.Ok(runAsr(chunk, settings))
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
@@ -500,16 +614,22 @@ class OfflineReprocessPipeline(
                 delay(500L * attempt * attempt)
             }
         }
-        throw Exception(
-            str(R.string.offline_asr_fail, chunk.index + 1, chunk.total, last?.message ?: "")
+        val reason = NetworkErrors.userMessage(
+            last ?: Exception("ASR failed"),
+            "ASR ${chunk.index + 1}/${chunk.total}"
         )
+        return SoftAsr.Skip(reason)
     }
 
-    private suspend fun translateWithRetry(
+    /**
+     * Translate with retries; on exhaustion returns [SoftZh.Incomplete] (empty ZH)
+     * so the session can still be saved with source text.
+     */
+    private suspend fun translateSoft(
         source: String,
         context: List<ContextTurn>,
         settings: UserSettings
-    ): String {
+    ): SoftZh {
         val maxAttempts = settings.maxNetworkAttempts.coerceIn(1, 10)
         var attempt = 0
         var last: Exception? = null
@@ -517,7 +637,12 @@ class OfflineReprocessPipeline(
             checkCancel()
             try {
                 awaitOnline()
-                return runTranslate(source, context, settings)
+                val zh = runTranslate(source, context, settings)
+                return if (zh.isBlank()) {
+                    SoftZh.Incomplete(str(R.string.offline_empty_translation))
+                } else {
+                    SoftZh.Ok(zh)
+                }
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
@@ -527,9 +652,11 @@ class OfflineReprocessPipeline(
                 delay(500L * attempt * attempt)
             }
         }
-        throw Exception(
-            str(R.string.offline_translate_fail, source.take(40), last?.message ?: "")
+        val reason = NetworkErrors.userMessage(
+            last ?: Exception("translate failed"),
+            source.take(40)
         )
+        return SoftZh.Incomplete(reason)
     }
 
     private suspend fun awaitOnline() {
@@ -596,24 +723,35 @@ class OfflineReprocessPipeline(
         ).collect { ev ->
             when (ev) {
                 is LlmStreamEvent.Delta -> zh += ev.text
-                is LlmStreamEvent.Completed -> if (ev.fullText.isNotEmpty()) zh = ev.fullText
+                is LlmStreamEvent.Completed -> {
+                    if (ev.fullText.isNotEmpty()) {
+                        zh = LlmClient.stripThinkingArtifacts(ev.fullText)
+                    }
+                }
                 is LlmStreamEvent.Error -> {
                     val ex = Exception(ev.throwable.message ?: "LLM error", ev.throwable)
                     if (ev.retryable) throw Retryable(ex) else throw ex
                 }
             }
         }
-        if (zh.isBlank()) throw Exception(str(R.string.offline_empty_translation))
+        zh = LlmClient.stripThinkingArtifacts(zh)
+        // Blank handled by translateSoft → Incomplete (do not abort whole job)
         return zh.trim()
     }
 
     private fun isRetryable(e: Exception): Boolean {
         if (e is Retryable) return true
+        // HTTP status embedded in messages from AsrClient / LlmClient
         val msg = e.message.orEmpty()
-        return msg.contains("timeout", ignoreCase = true) ||
-            msg.contains("HTTP 429") ||
-            msg.contains("HTTP 5") ||
-            msg.contains("HTTP 408")
+        val httpCode = Regex("""HTTP\s+(\d{3})""", RegexOption.IGNORE_CASE)
+            .find(msg)
+            ?.groupValues
+            ?.getOrNull(1)
+            ?.toIntOrNull()
+        if (httpCode != null) {
+            return NetworkErrors.isRetryableHttp(httpCode)
+        }
+        return NetworkErrors.isRetryableThrowable(e)
     }
 
     private class Retryable(cause: Exception) : Exception(cause.message, cause)

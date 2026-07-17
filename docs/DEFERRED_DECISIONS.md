@@ -1,26 +1,33 @@
-# 醒来后请确认的决策（已用合理默认落地）
+# 默认决策快照
 
-实现时为不阻塞进度，下列项已按默认实现。若要改，直接说编号即可。
+实现时为不阻塞进度的默认项。数值以 `UserSettings` / 设置为准；此处仅作对照。
 
-| # | 项 | 当前默认 | 可选 |
+| # | 项 | 当前默认 | 说明 |
 |---|----|----------|------|
-| 1 | 应用包名 | `com.example.livetranslate` | 改为你的域名包名 |
-| 2 | targetSdk | 34（buildTools 35.0.0） | 升到 35 |
-| 3 | 自动重试 | 最多 3 次尝试，退避 500ms×n² | 改次数/间隔 |
-| 4 | 暂停后点 Start | **同一会话 Resume**，不清空累积文本 | 暂停=结束会话 |
-| 5 | Stop 时 flush 尾段 | 开启（≥ minUtterance 才送 ASR） | 关闭 flush |
-| 6 | 默认 ASR model | `whisper-1` | 如 `gpt-4o-mini-transcribe` |
-| 7 | 默认 LLM model | `gpt-4o-mini` | 任意兼容模型 |
-| 8 | maxUtteranceMs | **15000（已确认）** | — |
-| 9 | silenceMs | **500（已确认）** | — |
-| 10 | 允许 HTTP cleartext | 是（本地兼容网关） | 仅 HTTPS |
-| 11 | App 图标 | 系统默认图标 | 自定义品牌图标 |
-| 12 | 合并到 master | **已合并（已确认）** | — |
+| 1 | 应用包名 | `com.example.livetranslate` | 可改为域名包名 |
+| 2 | targetSdk | 34（buildTools 35.0.0） | 可升 35 |
+| 3 | 自动重试 | 默认 3 次（可设 1–10），退避 500ms×n² | 设置「网络重试次数」 |
+| 4 | 暂停后 Start | **同一会话 Resume** | — |
+| 5 | Stop flush 尾段 | 开启（≥ minUtterance） | — |
+| 6 | 默认 ASR model | `whisper-1` | — |
+| 7 | 默认 LLM model | `gpt-4o-mini` | — |
+| 8 | maxUtteranceMs | **4500**（代码默认） | 设置可改 |
+| 9 | silenceMs | **500** | — |
+| 10 | minUtteranceMs | **1700** | — |
+| 11 | energyThreshold | **400** | — |
+| 12 | 文件导入 | 录音管线（VAD + 时间轴） | 非离线标点通道 |
+| 13 | 事后重跑失败 | **软跳过 + 仍保存** | 非整次作废 |
+| 14 | 字幕默认 | Both + FullSentence + 16sp | — |
+| 15 | HTTP cleartext | 是 | 本地网关 |
+| 16 | 合并到 master | 已合并 | — |
 
 ## 真机验收清单
 
-1. Android Studio 打开本项目，Sync，装到真机/模拟器  
-2. 设置页填入 ASR / LLM 的 Base URL 与 API Key  
-3. Start → 说英语 → 停顿 → 应先流式出 EN，再流式出 ZH  
-4. 连续说超过约 15s 不换气 → 应强制截断并开始下一段  
-5. Pause / Resume / Stop → 历史页可看会话并分享导出  
+1. Sync 并安装 → Settings 填 ASR / LLM，点 ℹ 与「还原默认」确认文案  
+2. 麦克风 Start → 停顿 → 主页**逐句双语对照**；沉浸模式仅双语  
+3. 只识别模式 → 无译文、不请求 LLM  
+4. 悬浮字幕：内容/布局/字号；通知锁定拖动  
+5. 文件导入 → 进度走 VAD 管线；历史有 offset 可点句  
+6. 历史「重新识别翻译」→ 故意断网/坏 Key 时仍应部分保存并提示跳过数  
+7. Pause / Resume / Stop → 历史导出 SRT / 录音  
+

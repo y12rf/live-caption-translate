@@ -1,5 +1,7 @@
 package com.example.livetranslate.service
 
+import com.example.livetranslate.data.settings.OverlayTextMode
+import com.example.livetranslate.data.settings.UserSettings
 import com.example.livetranslate.domain.LiveSessionUiState
 import com.example.livetranslate.service.SubtitleOverlayService.Companion.toOverlayCaption
 import org.junit.Assert.assertEquals
@@ -35,5 +37,33 @@ class SubtitleOverlayCaptionTest {
         val cap = LiveSessionUiState().toOverlayCaption()
         assertEquals("…", cap.en)
         assertEquals("…", cap.zh)
+    }
+
+    @Test
+    fun sourceOnly_hidesTranslation() {
+        val cap = LiveSessionUiState(
+            cumulativeEn = "Hello",
+            cumulativeZh = "你好",
+            partialEn = "",
+            partialZh = ""
+        ).toOverlayCaption(
+            UserSettings(overlayTextMode = OverlayTextMode.SourceOnly.name)
+        )
+        assertEquals("Hello", cap.en)
+        assertEquals("", cap.zh)
+    }
+
+    @Test
+    fun translationOnly_hidesSource() {
+        val cap = LiveSessionUiState(
+            cumulativeEn = "Hello",
+            cumulativeZh = "你好",
+            partialEn = "",
+            partialZh = ""
+        ).toOverlayCaption(
+            UserSettings(overlayTextMode = OverlayTextMode.TranslationOnly.name)
+        )
+        assertEquals("", cap.en)
+        assertEquals("你好", cap.zh)
     }
 }

@@ -9,6 +9,7 @@ import android.graphics.PixelFormat
 import android.graphics.drawable.GradientDrawable
 import android.os.Build
 import android.os.IBinder
+import android.text.TextUtils
 import android.view.Gravity
 import android.view.MotionEvent
 import android.view.View
@@ -20,6 +21,9 @@ import android.widget.ScrollView
 import android.widget.TextView
 import android.widget.Toast
 import com.example.livetranslate.LiveTranslateApp
+import com.example.livetranslate.R
+import com.example.livetranslate.data.settings.OverlayLayoutMode
+import com.example.livetranslate.data.settings.OverlayTextMode
 import com.example.livetranslate.data.settings.UserSettings
 import com.example.livetranslate.domain.LiveSessionUiState
 import kotlinx.coroutines.CoroutineScope
@@ -33,9 +37,10 @@ import kotlinx.coroutines.launch
 import kotlin.math.abs
 
 /**
- * System overlay showing bilingual live captions.
+ * System overlay showing live captions.
  *
- * - Rounded corners, configurable size / colors / opacity (Settings)
+ * - Rounded corners, configurable size / colors / opacity / font / text mode (Settings)
+ * - Layout: full sentence (centered) or single-line marquee
  * - Lock / unlock via **notification** action (not tap on overlay)
  * - Unlocked → drag to reposition; locked → fixed + touch-through
  */
@@ -193,16 +198,22 @@ class SubtitleOverlayService : Service() {
                 applyChrome(s)
                 applyLayoutSize(s)
                 applyStackOrder(s)
+                applyTextStyle(s)
             }
         }
 
         captionJob = scope.launch {
             controller.state
-                .map { st -> st.toOverlayCaption() }
+                .map { st -> st.toOverlayCaption(overlaySettings) }
                 .distinctUntilChanged()
                 .collect { cap ->
                     enView?.text = cap.en
                     zhView?.text = cap.zh
+                    // Marquee needs isSelected to keep scrolling
+                    if (overlaySettings.overlayLayoutModeEnum() == OverlayLayoutMode.ScrollLine) {
+                        enView?.isSelected = true
+                        zhView?.isSelected = true
+                    }
                 }
         }
     }
@@ -231,7 +242,9 @@ class SubtitleOverlayService : Service() {
         }
         applyChrome(overlaySettings)
         if (showToast) {
-            val msg = if (locked) "悬浮窗已锁定" else "悬浮窗已解锁，可拖动"
+            val msg = getString(
+                if (locked) R.string.overlay_locked else R.string.overlay_unlocked
+            )
             Toast.makeText(this, msg, Toast.LENGTH_SHORT).show()
         }
     }
@@ -269,9 +282,8 @@ class SubtitleOverlayService : Service() {
     }
 
     /**
-     * Reorder panel children: [top] / divider / [bottom]
+     * Reorder panel children based on text mode + stack order.
      * Default top = translation (ZH), bottom = original (EN).
-     * Both rows: MATCH_PARENT width + equal weight (horizontal full / vertical 50-50).
      */
     private fun applyStackOrder(s: UserSettings) {
         val p = panel ?: return
@@ -279,24 +291,67 @@ class SubtitleOverlayService : Service() {
         val en = enView ?: return
         val div = dividerView ?: return
         val density = resources.displayMetrics.density
-        val padH = (14 * density).toInt()
-        val padV = (10 * density).toInt()
-
-        val top = if (s.overlayTranslationOnTop) zh else en
-        val bottom = if (s.overlayTranslationOnTop) en else zh
-
-        // Symmetric padding & same size so halves look equal
-        top.setPadding(padH, padV, padH, padV)
-        bottom.setPadding(padH, padV, padH, padV)
-        top.textSize = 16f
-        bottom.textSize = 16f
-        top.gravity = Gravity.CENTER_VERTICAL or Gravity.START
-        bottom.gravity = Gravity.CENTER_VERTICAL or Gravity.START
+        val mode = s.overlayTextModeEnum()
 
         p.removeAllViews()
-        p.addView(top, halfRowLp())
-        p.addView(div, dividerLp(density))
-        p.addView(bottom, halfRowLp())
+        when (mode) {
+            OverlayTextMode.SourceOnly -> {
+                en.visibility = View.VISIBLE
+                zh.visibility = View.GONE
+                div.visibility = View.GONE
+                p.addView(en, halfRowLp())
+            }
+            OverlayTextMode.TranslationOnly -> {
+                zh.visibility = View.VISIBLE
+                en.visibility = View.GONE
+                div.visibility = View.GONE
+                p.addView(zh, halfRowLp())
+            }
+            OverlayTextMode.Both -> {
+                en.visibility = View.VISIBLE
+                zh.visibility = View.VISIBLE
+                div.visibility = View.VISIBLE
+                val top = if (s.overlayTranslationOnTop) zh else en
+                val bottom = if (s.overlayTranslationOnTop) en else zh
+                p.addView(top, halfRowLp())
+                p.addView(div, dividerLp(density))
+                p.addView(bottom, halfRowLp())
+            }
+        }
+        applyTextStyle(s)
+    }
+
+    /** Font size + full-sentence center vs single-line marquee. */
+    private fun applyTextStyle(s: UserSettings) {
+        val density = resources.displayMetrics.density
+        val padH = (14 * density).toInt()
+        val padV = (10 * density).toInt()
+        val fontSp = s.overlayFontSizeSp.coerceIn(10, 48).toFloat()
+        val layout = s.overlayLayoutModeEnum()
+        listOfNotNull(enView, zhView).forEach { tv ->
+            tv.setPadding(padH, padV, padH, padV)
+            tv.textSize = fontSp
+            when (layout) {
+                OverlayLayoutMode.FullSentence -> {
+                    tv.isSingleLine = false
+                    tv.maxLines = 8
+                    tv.ellipsize = null
+                    tv.isSelected = false
+                    tv.gravity = Gravity.CENTER
+                    tv.textAlignment = View.TEXT_ALIGNMENT_CENTER
+                }
+                OverlayLayoutMode.ScrollLine -> {
+                    tv.isSingleLine = true
+                    tv.maxLines = 1
+                    tv.ellipsize = TextUtils.TruncateAt.MARQUEE
+                    tv.marqueeRepeatLimit = -1
+                    tv.isSelected = true
+                    tv.isFocusable = true
+                    tv.gravity = Gravity.CENTER_VERTICAL or Gravity.START
+                    tv.textAlignment = View.TEXT_ALIGNMENT_VIEW_START
+                }
+            }
+        }
     }
 
     /** Full-width row, shares remaining height equally with the other half. */
@@ -417,20 +472,31 @@ class SubtitleOverlayService : Service() {
         /**
          * Live-caption style: show streaming partials when present, otherwise the
          * latest completed line — not the full cumulative transcript.
+         * Honors [UserSettings.overlayTextMode] for which lines are filled.
          */
-        internal fun LiveSessionUiState.toOverlayCaption(): OverlayCaption {
-            val en = when {
+        internal fun LiveSessionUiState.toOverlayCaption(
+            settings: UserSettings = UserSettings()
+        ): OverlayCaption {
+            val enRaw = when {
                 partialEn.isNotBlank() -> partialEn.trim()
                 else -> lastLine(cumulativeEn)
             }
-            val zh = when {
+            val zhRaw = when {
                 partialZh.isNotBlank() -> partialZh.trim()
                 else -> lastLine(cumulativeZh)
             }
-            return OverlayCaption(
-                en = en.ifBlank { "…" }.takeLast(220),
-                zh = zh.ifBlank { "…" }.takeLast(220)
-            )
+            val mode = settings.overlayTextModeEnum()
+            val en = when (mode) {
+                OverlayTextMode.TranslationOnly -> ""
+                else -> enRaw.ifBlank { "…" }.takeLast(220)
+            }
+            val zh = when (mode) {
+                OverlayTextMode.SourceOnly -> ""
+                else -> zhRaw.ifBlank {
+                    if (settings.asrOnlyMode) "" else "…"
+                }.takeLast(220)
+            }
+            return OverlayCaption(en = en, zh = zh)
         }
 
         private fun lastLine(block: String): String {

@@ -228,11 +228,13 @@ fun HistoryDetailScreen(
 
     LaunchedEffect(reprocess.lastSavedSessionId) {
         val id = reprocess.lastSavedSessionId ?: return@LaunchedEffect
+        val toastMsg = reprocess.message.takeIf { it.isNotBlank() }
+            ?: context.getString(R.string.reprocess_saved)
         viewModel.clearReprocessSaved()
         android.widget.Toast.makeText(
             context,
-            context.getString(R.string.reprocess_saved),
-            android.widget.Toast.LENGTH_SHORT
+            toastMsg,
+            android.widget.Toast.LENGTH_LONG
         ).show()
         onOpenSession(id)
     }
@@ -330,7 +332,7 @@ fun HistoryDetailScreen(
                         RecordingShareHelper.shareText(
                             context,
                             srt,
-                            chooserTitle = "分享 SRT",
+                            chooserTitle = context.getString(R.string.share_srt_chooser),
                             mimeType = "application/x-subrip"
                         )
                     }) {
