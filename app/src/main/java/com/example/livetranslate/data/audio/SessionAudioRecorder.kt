@@ -23,6 +23,7 @@ class SessionAudioRecorder(
     private var raf: RandomAccessFile? = null
     private var outFile: File? = null
     private var pcmBytes: Long = 0L
+    private var loggedCap: Boolean = false
     private val active = AtomicBoolean(false)
 
     val isActive: Boolean get() = active.get()
@@ -49,6 +50,15 @@ class SessionAudioRecorder(
         if (!active.get() || samples.isEmpty()) return
         synchronized(lock) {
             val access = raf ?: return
+            // Classic WAV data size is 32-bit; stop growing past Int.MAX_VALUE payload.
+            val add = samples.size * 2L
+            if (pcmBytes + add > MAX_PCM_BYTES) {
+                if (!loggedCap) {
+                    Log.w(TAG, "writeFrame: hit WAV size cap ($MAX_PCM_BYTES); further frames ignored")
+                    loggedCap = true
+                }
+                return
+            }
             try {
                 val bytes = ByteArray(samples.size * 2)
                 val bb = ByteBuffer.wrap(bytes).order(ByteOrder.LITTLE_ENDIAN)
@@ -78,15 +88,16 @@ class SessionAudioRecorder(
                 Log.i(TAG, "finish: empty recording discarded")
                 null
             } else {
+                val dataSize = pcmBytes.coerceAtMost(MAX_PCM_BYTES).toInt()
                 access.seek(0)
                 access.write(
                     WavEncoder.buildHeader(
-                        dataSize = pcmBytes.toInt().coerceAtLeast(0),
+                        dataSize = dataSize,
                         sampleRate = sampleRate
                     )
                 )
                 access.close()
-                Log.i(TAG, "finish: ${file.absolutePath} pcmBytes=$pcmBytes")
+                Log.i(TAG, "finish: ${file.absolutePath} pcmBytes=$pcmBytes dataSize=$dataSize")
                 file.absolutePath
             }
         } catch (e: Exception) {
@@ -99,6 +110,7 @@ class SessionAudioRecorder(
             null
         } finally {
             pcmBytes = 0L
+            loggedCap = false
         }
     }
 
@@ -116,11 +128,14 @@ class SessionAudioRecorder(
         }
         outFile = null
         pcmBytes = 0L
+        loggedCap = false
     }
 
     companion object {
         private const val TAG = "SessionAudioRecorder"
         const val RECORDINGS_DIR = "recordings"
+        /** Classic WAV `data` chunk size is signed 32-bit; stay within range. */
+        const val MAX_PCM_BYTES: Long = Int.MAX_VALUE.toLong()
         private val fileStamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US)
 
         fun fileForPath(path: String?): File? {

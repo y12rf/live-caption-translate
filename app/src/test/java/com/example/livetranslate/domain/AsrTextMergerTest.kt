@@ -13,4 +13,15 @@ class AsrTextMergerTest {
     fun append_whenNotPrefix() {
         assertEquals("hello world", AsrTextMerger.merge("hello ", "world"))
     }
+
+    @Test
+    fun snapshot_lengthRegression() {
+        assertEquals("hi", AsrTextMerger.merge("hi there", "hi"))
+    }
+
+    @Test
+    fun snapshot_nearPrefixRewrite() {
+        // Common Whisper correction: shared prefix, rewritten tail
+        assertEquals("hello word", AsrTextMerger.merge("hello wrd", "hello word"))
+    }
 }

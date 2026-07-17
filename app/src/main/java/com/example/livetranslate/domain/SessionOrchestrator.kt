@@ -8,6 +8,7 @@ import com.example.livetranslate.data.asr.AsrOutputSanitizer
 import com.example.livetranslate.data.audio.AudioCapture
 import com.example.livetranslate.data.audio.FfmpegAudioConverter
 import com.example.livetranslate.data.audio.FileAudioSegmenter
+import com.example.livetranslate.data.audio.ParkedPcmStore
 import com.example.livetranslate.data.audio.UtteranceDiskQueue
 import com.example.livetranslate.data.history.ExportTextMode
 import com.example.livetranslate.data.history.HistoryExport
@@ -41,6 +42,7 @@ import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.withTimeoutOrNull
 import java.io.File
 import java.io.FileOutputStream
+import java.io.IOException
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicLong
@@ -126,8 +128,11 @@ class SessionOrchestrator(
     private val failIdGen = AtomicLong(1)
     private val segmentIdGen = AtomicLong(1)
 
-    private val translationCache = TranslationCache(TranslationCache.DEFAULT_MAX_SIZE)
+    private var translationCache = TranslationCache(TranslationCache.DEFAULT_MAX_SIZE)
+    @Volatile
+    private var translationCacheMaxSetting: Int = TranslationCache.DEFAULT_MAX_SIZE
     private val diskQueue = UtteranceDiskQueue(this.appContext)
+    private val parkedPcm = ParkedPcmStore(this.appContext)
     private val ffmpegConverter = FfmpegAudioConverter()
     private val fileSegmenter = FileAudioSegmenter(appContext = this.appContext)
 
@@ -139,6 +144,16 @@ class SessionOrchestrator(
 
     private val stopOnce = AtomicBoolean(false)
     private val draining = AtomicBoolean(false)
+    /** Second [stop] while draining forces an early exit from the wait loop. */
+    private val drainAbort = AtomicBoolean(false)
+    /**
+     * Bumped when workers are torn down so late `finally` blocks do not decrement
+     * [asrInFlight] / [llmInFlight] for a new generation (avoids negative counters).
+     */
+    private val workerGeneration = AtomicLong(0)
+    /** Tags disk overflow so a new session does not mix another session's PCM until retag. */
+    private val sessionEpoch = AtomicLong(1)
+
     /**
      * User requested pause: keep [SessionPhase.Paused] even while ASR/LLM backlog drains,
      * so [refreshPhase] / workers do not flip UI back to Processing.
@@ -166,7 +181,33 @@ class SessionOrchestrator(
                 }
             }
         }
+        scope.launch {
+            settingsRepo.settings.collect { s ->
+                translationCacheMaxSetting = s.translationCacheMax.coerceIn(0, 500)
+            }
+        }
     }
+
+    private fun resetTranslationCache() {
+        val max = translationCacheMaxSetting.coerceIn(0, 500)
+        if (translationCache.maxSize != max) {
+            translationCache = TranslationCache(max)
+        } else {
+            translationCache.clear()
+        }
+    }
+
+    private fun beginNewSessionEpoch() {
+        val epoch = sessionEpoch.incrementAndGet()
+        // Crash / unsaved backlog: adopt leftover disk into this session for recovery.
+        try {
+            diskQueue.retagAll(epoch)
+        } catch (e: Exception) {
+            android.util.Log.w(TAG, "retag disk failed", e)
+        }
+    }
+
+    private fun currentEpoch(): Long = sessionEpoch.get()
 
     fun setAudioSource(type: AudioSourceType) {
         if (_state.value.phase != SessionPhase.Idle) return
@@ -203,6 +244,15 @@ class SessionOrchestrator(
         if (current == SessionPhase.Recording || current == SessionPhase.Processing) return
         if (stopOnce.get() && current != SessionPhase.Paused) return
         if (draining.get()) return
+        if (pendingSave != null) {
+            _state.update {
+                it.copy(
+                    error = "有未保存会话，请先「重试保存」后再开始（避免丢稿）",
+                    canRetrySave = true
+                )
+            }
+            return
+        }
         if (_state.value.audioSource == AudioSourceType.File) {
             _state.update {
                 it.copy(error = "文件模式请点 Start 后选择音频文件")
@@ -213,11 +263,11 @@ class SessionOrchestrator(
         userPaused.set(false)
         if (current == SessionPhase.Idle) {
             stopOnce.set(false)
-            pendingSave = null
+            beginNewSessionEpoch()
             sessionStartedAt = System.currentTimeMillis()
             recordedElapsedMs = 0L
             clearContextWindow()
-            translationCache.clear()
+            resetTranslationCache()
             clearFailList()
             dropped.set(0)
             resetTitleState()
@@ -278,16 +328,22 @@ class SessionOrchestrator(
     fun startFromFile(uri: Uri) {
         if (_state.value.phase != SessionPhase.Idle) return
         if (draining.get()) return
+        if (pendingSave != null) {
+            _state.update {
+                it.copy(
+                    error = "有未保存会话，请先「重试保存」后再导入文件",
+                    canRetrySave = true
+                )
+            }
+            return
+        }
 
         fileJob?.cancel()
         fileJob = scope.launch {
             try {
                 runFileImport(uri)
             } catch (e: CancellationException) {
-                try {
-                    audio.discardSessionRecording()
-                } catch (_: Exception) {
-                }
+                teardownPipeline(discardAudio = true)
                 _state.update {
                     it.copy(
                         phase = SessionPhase.Idle,
@@ -298,20 +354,17 @@ class SessionOrchestrator(
                 throw e
             } catch (e: Exception) {
                 android.util.Log.e(TAG, "startFromFile failed", e)
-                try {
-                    audio.discardSessionRecording()
-                } catch (_: Exception) {
-                }
-                stopTimer()
-                collector?.cancel()
-                collector = null
+                teardownPipeline(discardAudio = true)
                 stopOnce.set(false)
                 _state.update {
                     it.copy(
                         phase = SessionPhase.Idle,
                         importStatus = null,
                         error = e.message ?: "文件导入失败",
-                        canRetry = false
+                        canRetry = false,
+                        asrQueueDepth = 0,
+                        llmQueueDepth = 0,
+                        diskQueueDepth = diskQueue.size()
                     )
                 }
             }
@@ -321,11 +374,11 @@ class SessionOrchestrator(
     private suspend fun runFileImport(uri: Uri) {
         stopOnce.set(false)
         userPaused.set(false)
-        pendingSave = null
+        beginNewSessionEpoch()
         sessionStartedAt = System.currentTimeMillis()
         recordedElapsedMs = 0L
         clearContextWindow()
-        translationCache.clear()
+        resetTranslationCache()
         clearFailList()
         dropped.set(0)
         resetTitleState()
@@ -486,10 +539,17 @@ class SessionOrchestrator(
 
     /**
      * @param drain If true, stop capture but wait for in-memory queues (up to [DRAIN_TIMEOUT_MS])
-     *              before cancelling workers. Non-empty disk overflow is kept for the next session.
+     *              before cancelling workers. Call [stop] again while draining to abort the wait.
      */
     fun stop(drain: Boolean = true) {
-        if (!stopOnce.compareAndSet(false, true)) return
+        if (!stopOnce.compareAndSet(false, true)) {
+            // Re-entrant stop: abort an in-progress drain so user can force-exit.
+            if (draining.get()) {
+                drainAbort.set(true)
+                android.util.Log.i(TAG, "stop re-entered; aborting drain wait")
+            }
+            return
+        }
         if (_state.value.phase == SessionPhase.Idle && pendingSave == null) {
             stopOnce.set(false)
             return
@@ -519,12 +579,13 @@ class SessionOrchestrator(
 
         scope.launch {
             try {
+                drainAbort.set(false)
                 draining.set(drain)
                 _state.update {
                     it.copy(
                         draining = drain,
                         phase = SessionPhase.Processing,
-                        importStatus = if (drain) "正在排空队列并保存…" else "正在保存…"
+                        importStatus = if (drain) "正在排空队列并保存…（再按 Stop 可强制结束）" else "正在保存…"
                     )
                 }
 
@@ -534,31 +595,22 @@ class SessionOrchestrator(
                         pumpDiskIntoMemory()
                     }
                     val drained = withTimeoutOrNull(DRAIN_TIMEOUT_MS) {
-                        while (isActive && pipelineBusy()) {
+                        while (isActive && pipelineBusy() && !drainAbort.get()) {
                             delay(200)
                         }
                         true
                     }
-                    if (drained != true) {
-                        android.util.Log.w(TAG, "drain timeout; cancelling workers")
+                    if (drained != true || drainAbort.get()) {
+                        android.util.Log.w(
+                            TAG,
+                            "drain ended early timeout=${drained != true} abort=${drainAbort.get()}"
+                        )
                     }
                 }
 
-                // Park leftover queue items before tearing down workers/channels.
+                // Park leftover queue items, then cancel in-flight with join+salvage.
                 salvageOpenQueuesToDiskOrFail()
-
-                asrWorker?.cancel()
-                asrWorker = null
-                llmWorker?.cancel()
-                llmWorker = null
-                utteranceQueue.close()
-                translateQueue.close()
-                utteranceQueue = newAsrChannel()
-                translateQueue = newLlmChannel()
-                asrInFlight.set(0)
-                llmInFlight.set(0)
-                asrQueued.set(0)
-                llmQueued.set(0)
+                teardownWorkersAndChannels(joinTimeoutMs = WORKER_JOIN_MS)
                 draining.set(false)
 
                 // Wait briefly for title
@@ -587,7 +639,14 @@ class SessionOrchestrator(
                             title = title
                         )
                         pendingSave = null
-                        finalizeIdle(snapshot.overlayEnabled, clearFail = true)
+                        // Session archived: clear disk overflow so next lecture is not mixed.
+                        // Keep fail list for incomplete LLM/ASR retry until user dismisses.
+                        try {
+                            diskQueue.clear()
+                        } catch (e: Exception) {
+                            android.util.Log.w(TAG, "disk clear after save failed", e)
+                        }
+                        finalizeIdle(snapshot.overlayEnabled, clearFail = false)
                     } catch (e: Exception) {
                         android.util.Log.e(TAG, "saveSession failed", e)
                         pendingSave = PendingSave(started, segs, audioPath, title, snapshot.overlayEnabled)
@@ -621,6 +680,49 @@ class SessionOrchestrator(
                 }
             } finally {
                 stopOnce.set(false)
+                drainAbort.set(false)
+            }
+        }
+    }
+
+    /**
+     * Cancel ASR/LLM workers, join briefly so in-flight salvage runs, then reset channels/counters.
+     * Invalidates [workerGeneration] so late finally blocks cannot drive counters negative.
+     */
+    private suspend fun teardownWorkersAndChannels(joinTimeoutMs: Long) {
+        workerGeneration.incrementAndGet()
+        val asr = asrWorker
+        val llm = llmWorker
+        asr?.cancel()
+        llm?.cancel()
+        withTimeoutOrNull(joinTimeoutMs) {
+            asr?.join()
+            llm?.join()
+        }
+        asrWorker = null
+        llmWorker = null
+        utteranceQueue.close()
+        translateQueue.close()
+        utteranceQueue = newAsrChannel()
+        translateQueue = newLlmChannel()
+        asrInFlight.set(0)
+        llmInFlight.set(0)
+        asrQueued.set(0)
+        llmQueued.set(0)
+    }
+
+    /** Full idle teardown for failed/cancelled file import (workers + audio). */
+    private suspend fun teardownPipeline(discardAudio: Boolean) {
+        stopTimer()
+        collector?.cancel()
+        collector = null
+        salvageOpenQueuesToDiskOrFail()
+        teardownWorkersAndChannels(joinTimeoutMs = WORKER_JOIN_MS)
+        draining.set(false)
+        if (discardAudio) {
+            try {
+                audio.discardSessionRecording()
+            } catch (_: Exception) {
             }
         }
     }
@@ -637,7 +739,11 @@ class SessionOrchestrator(
                     title = p.title
                 )
                 pendingSave = null
-                finalizeIdle(p.overlayEnabled, clearFail = true)
+                try {
+                    diskQueue.clear()
+                } catch (_: Exception) {
+                }
+                finalizeIdle(p.overlayEnabled, clearFail = false)
             } catch (e: Exception) {
                 _state.update {
                     it.copy(
@@ -715,7 +821,7 @@ class SessionOrchestrator(
         }
         asrQueued.decrementAndGet()
         try {
-            diskQueue.enqueue(utt)
+            diskQueue.enqueue(utt, sessionEpoch = currentEpoch())
             publishQueueDepths()
             _state.update {
                 it.copy(error = "处理队列已满，句子已缓存到本地（磁盘 ${diskQueue.size()}）")
@@ -733,15 +839,16 @@ class SessionOrchestrator(
 
     private fun pumpDiskIntoMemory() {
         if (!network.isOnline()) return
+        val epoch = currentEpoch()
         var n = 0
         while (asrQueued.get() < ASR_QUEUE_CAP) {
-            val u = diskQueue.poll() ?: break
+            val u = diskQueue.poll(sessionEpoch = epoch) ?: break
             asrQueued.incrementAndGet()
             val ok = utteranceQueue.trySend(u)
             if (!ok.isSuccess) {
                 asrQueued.decrementAndGet()
                 try {
-                    diskQueue.enqueue(u)
+                    diskQueue.enqueue(u, sessionEpoch = epoch)
                 } catch (_: Exception) {
                     dropped.incrementAndGet()
                 }
@@ -752,7 +859,7 @@ class SessionOrchestrator(
         if (n > 0) {
             ensureWorkers()
             publishQueueDepths()
-            android.util.Log.i(TAG, "pumped $n utterances from disk")
+            android.util.Log.i(TAG, "pumped $n utterances from disk (epoch=$epoch)")
         } else {
             publishQueueDepths()
         }
@@ -792,13 +899,14 @@ class SessionOrchestrator(
             for (item in batch) {
                 when (item) {
                     is FailedWork.Asr -> {
+                        val utt = resolveAsrFailUtt(item) ?: continue
                         asrQueued.incrementAndGet()
-                        if (!utteranceQueue.trySend(item.utt).isSuccess) {
+                        if (!utteranceQueue.trySend(utt).isSuccess) {
                             asrQueued.decrementAndGet()
                             try {
-                                diskQueue.enqueue(item.utt)
+                                diskQueue.enqueue(utt, sessionEpoch = currentEpoch())
                             } catch (_: Exception) {
-                                pushFail(item)
+                                pushAsrFail(utt, item.message)
                             }
                         }
                     }
@@ -819,6 +927,19 @@ class SessionOrchestrator(
             }
             publishQueueDepths()
         }
+    }
+
+    private fun resolveAsrFailUtt(item: FailedWork.Asr): UtteranceAudio? {
+        val id = item.diskId
+        if (id != null) {
+            val parked = parkedPcm.take(id)
+            if (parked != null) return parked
+            // Fall back to in-memory stub only if it still has PCM
+            if (item.utt.pcm.isNotEmpty()) return item.utt
+            android.util.Log.w(TAG, "ASR fail diskId=$id missing; drop")
+            return null
+        }
+        return item.utt
     }
 
     private fun autoRetryFailedIfOnline() {
@@ -893,14 +1014,21 @@ class SessionOrchestrator(
         _state.update {
             it.copy(error = "离线中，等待网络恢复后再$tag…", networkOnline = false)
         }
-        while (!network.isOnline()) {
-            delay(500)
-            network.refresh()
+        val ok = withTimeoutOrNull(AWAIT_ONLINE_TIMEOUT_MS) {
+            while (!network.isOnline()) {
+                delay(500)
+                network.refresh()
+            }
+            true
+        }
+        if (ok != true) {
+            throw RetryableException(IOException("等待网络超时（${AWAIT_ONLINE_TIMEOUT_MS / 1000}s）"))
         }
         _state.update { it.copy(networkOnline = true, error = null) }
     }
 
     private suspend fun processAsrWithRetry(utt: UtteranceAudio) {
+        val gen = workerGeneration.get()
         asrInFlight.incrementAndGet()
         _state.update {
             it.copy(
@@ -923,13 +1051,7 @@ class SessionOrchestrator(
                     val en = runAsr(utt, settings)
                     if (en.isBlank()) {
                         // Soft-fail: park for retry instead of silent drop
-                        pushFail(
-                            FailedWork.Asr(
-                                id = failIdGen.getAndIncrement(),
-                                utt = utt,
-                                message = "ASR 返回空文本（可能噪声/过短）"
-                            )
-                        )
+                        pushAsrFail(utt, "ASR 返回空文本（可能噪声/过短）")
                         _state.update { it.copy(partialEn = "") }
                         return
                     }
@@ -943,14 +1065,14 @@ class SessionOrchestrator(
                     val window = settings.contextWindowSize
                     llmQueued.incrementAndGet()
                     val sent = translateQueue.trySend(
-                        PendingTranslate(utt, en, window, localId)
+                        PendingTranslate(utt.copy(pcm = ByteArray(0)), en, window, localId)
                     )
                     if (!sent.isSuccess) {
                         llmQueued.decrementAndGet()
                         pushFail(
                             FailedWork.Llm(
                                 id = failIdGen.getAndIncrement(),
-                                utt = utt,
+                                utt = utt.copy(pcm = ByteArray(0)),
                                 en = en,
                                 windowSize = window,
                                 segmentLocalId = localId,
@@ -960,6 +1082,7 @@ class SessionOrchestrator(
                     }
                     return
                 } catch (e: CancellationException) {
+                    salvageInFlightAsr(utt)
                     throw e
                 } catch (e: RetryableException) {
                     lastError = e
@@ -972,22 +1095,18 @@ class SessionOrchestrator(
                 }
             }
             val msg = NetworkErrors.userMessage(lastError ?: Exception("ASR failed"), "ASR")
-            // Keep PCM only in fail list (retry) — avoid double-processing via disk.
-            pushFail(
-                FailedWork.Asr(
-                    id = failIdGen.getAndIncrement(),
-                    utt = utt,
-                    message = msg
-                )
-            )
+            pushAsrFail(utt, msg)
         } finally {
-            asrInFlight.decrementAndGet()
+            if (workerGeneration.get() == gen) {
+                asrInFlight.decrementAndGet()
+            }
             publishQueueDepths()
             refreshPhase()
         }
     }
 
     private suspend fun processTranslateWithRetry(job: PendingTranslate) {
+        val gen = workerGeneration.get()
         llmInFlight.incrementAndGet()
         _state.update {
             it.copy(
@@ -1011,6 +1130,7 @@ class SessionOrchestrator(
                     runTranslate(job, settings) { partial -> bestPartial = partial }
                     return
                 } catch (e: CancellationException) {
+                    salvageInFlightLlm(job, bestPartial)
                     throw e
                 } catch (e: RetryableException) {
                     // Partial adopt: enough Chinese already streamed
@@ -1045,10 +1165,43 @@ class SessionOrchestrator(
                 )
             )
         } finally {
-            llmInFlight.decrementAndGet()
+            if (workerGeneration.get() == gen) {
+                llmInFlight.decrementAndGet()
+            }
             publishQueueDepths()
             refreshPhase()
         }
+    }
+
+    /** On cancel during stop/drain: re-park ASR PCM so it is not lost. */
+    private fun salvageInFlightAsr(utt: UtteranceAudio) {
+        if (utt.pcm.isEmpty()) return
+        try {
+            diskQueue.enqueue(utt, sessionEpoch = currentEpoch())
+            android.util.Log.i(TAG, "salvaged in-flight ASR → disk")
+        } catch (e: Exception) {
+            pushAsrFail(utt, "停止时识别未完成：${e.message}")
+        }
+    }
+
+    /** On cancel: keep partial ZH if useful, else fail-list for retry. */
+    private fun salvageInFlightLlm(job: PendingTranslate, bestPartial: String) {
+        val partial = bestPartial.trim()
+        if (partial.length >= MIN_PARTIAL_ZH) {
+            finishTranslation(job, job.en, partial, incomplete = true)
+            return
+        }
+        markSegmentFailed(job.segmentLocalId, "会话结束时翻译未完成")
+        pushFail(
+            FailedWork.Llm(
+                id = failIdGen.getAndIncrement(),
+                utt = job.utt,
+                en = job.en,
+                windowSize = job.windowSize,
+                segmentLocalId = job.segmentLocalId,
+                message = "会话结束时翻译未完成"
+            )
+        )
     }
 
     private suspend fun runAsr(utt: UtteranceAudio, settings: UserSettings): String {
@@ -1323,15 +1476,42 @@ class SessionOrchestrator(
 
     private fun pushFail(item: FailedWork) {
         synchronized(failLock) {
-            while (failList.size >= MAX_FAIL_LIST) failList.removeFirst()
+            while (failList.size >= MAX_FAIL_LIST) {
+                val old = failList.removeFirst()
+                if (old is FailedWork.Asr) {
+                    old.diskId?.let { runCatching { parkedPcm.take(it) } }
+                }
+            }
             failList.addLast(item)
         }
         publishFailState(error = item.message)
     }
 
+    /** Prefer parking ASR PCM on disk so the fail list stays RAM-light. */
+    private fun pushAsrFail(utt: UtteranceAudio, message: String) {
+        val id = failIdGen.getAndIncrement()
+        val diskId = try {
+            if (utt.pcm.isNotEmpty()) parkedPcm.park(utt) else null
+        } catch (e: Exception) {
+            android.util.Log.w(TAG, "park ASR fail PCM failed", e)
+            null
+        }
+        val stub = if (diskId != null) {
+            utt.copy(pcm = ByteArray(0))
+        } else {
+            utt
+        }
+        pushFail(FailedWork.Asr(id = id, utt = stub, message = message, diskId = diskId))
+    }
+
     private fun clearFailList() {
-        synchronized(failLock) {
+        val diskIds = synchronized(failLock) {
+            val ids = failList.mapNotNull { (it as? FailedWork.Asr)?.diskId }
             failList.clear()
+            ids
+        }
+        for (id in diskIds) {
+            runCatching { parkedPcm.take(id) }
         }
     }
 
@@ -1376,7 +1556,7 @@ class SessionOrchestrator(
             val utt = result.getOrNull() ?: break
             asrQueued.decrementAndGet()
             try {
-                diskQueue.enqueue(utt)
+                diskQueue.enqueue(utt, sessionEpoch = currentEpoch())
                 asrSalvaged++
             } catch (e: Exception) {
                 dropped.incrementAndGet()
@@ -1432,6 +1612,10 @@ class SessionOrchestrator(
         }
     }
 
+    /**
+     * @param clearFail When true (empty session discard), drop fail list.
+     *                  After a successful save, pass false so incomplete work stays retryable.
+     */
     private fun finalizeIdle(overlayEnabled: Boolean, clearFail: Boolean) {
         userPaused.set(false)
         val diskDepth = try {
@@ -1439,16 +1623,16 @@ class SessionOrchestrator(
         } catch (_: Exception) {
             0
         }
-        // Never wipe non-empty disk overflow — next session / pump recovers offline backlog.
-        // (Previously clearFail always diskQueue.clear(), contradicting stop KDoc.)
-        if (clearFail && diskDepth == 0) {
+        if (clearFail) {
             clearFailList()
-        } else if (clearFail && diskDepth > 0) {
-            // Keep fail list too when PCM is parked offline so user can retry after reconnect.
-            android.util.Log.i(TAG, "finalizeIdle: keeping disk queue ($diskDepth) and fail list")
+        } else {
+            android.util.Log.i(
+                TAG,
+                "finalizeIdle: keeping fail list; diskDepth=$diskDepth"
+            )
         }
         clearContextWindow()
-        translationCache.clear()
+        resetTranslationCache()
         resetTitleState()
         sessionStartedAt = 0L
         recordedElapsedMs = 0L
@@ -1550,6 +1734,8 @@ class SessionOrchestrator(
         private const val TITLE_WAIT_MS = 8_000L
         private const val TITLE_CALL_TIMEOUT_MS = 10_000L
         private const val DRAIN_TIMEOUT_MS = 45_000L
+        private const val WORKER_JOIN_MS = 3_000L
+        private const val AWAIT_ONLINE_TIMEOUT_MS = 120_000L
         /** Max wait after file VAD for ASR/LLM to finish before force-save. */
         private const val FILE_PIPELINE_TIMEOUT_MS = 30 * 60_000L
         private const val MAX_ATTEMPTS = 3

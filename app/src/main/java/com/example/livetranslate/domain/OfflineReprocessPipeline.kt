@@ -297,7 +297,7 @@ class OfflineReprocessPipeline(
         }
 
         checkCancel()
-        val asrParts = ArrayList<String>(chunks.size)
+        val asrParts = ArrayList<TimedAsrPart>(chunks.size)
         var asrSkipped = 0
         var lastAsrSkipReason: String? = null
         for (chunk in chunks) {
@@ -311,7 +311,15 @@ class OfflineReprocessPipeline(
             }
             when (val outcome = transcribeSoft(chunk, settings)) {
                 is SoftAsr.Ok -> {
-                    if (outcome.text.isNotBlank()) asrParts.add(outcome.text)
+                    if (outcome.text.isNotBlank()) {
+                        asrParts.add(
+                            TimedAsrPart(
+                                text = outcome.text,
+                                startMs = chunk.startMs.coerceAtLeast(0L),
+                                durationMs = chunk.durationMs.coerceAtLeast(0L)
+                            )
+                        )
+                    }
                     // blank ASR (noise) is soft-skipped without counting as failure
                 }
                 is SoftAsr.Skip -> {
@@ -335,28 +343,28 @@ class OfflineReprocessPipeline(
             }
         }
 
-        val fullText = asrParts.joinToString(" ").trim()
+        val fullText = asrParts.joinToString(" ") { it.text }.trim()
         if (fullText.isBlank()) {
             val hint = lastAsrSkipReason?.let { " ($it)" }.orEmpty()
             throw Exception(str(R.string.offline_asr_empty) + hint)
         }
 
-        // Fallback: no punctuation breaks → treat whole transcript as one segment
-        var sentences = PunctuationSegmenter.split(fullText)
-        if (sentences.isEmpty()) {
-            sentences = listOf(fullText)
-            android.util.Log.w(TAG, "punctuation split empty; using full text as one sentence")
+        // Split per timed ASR chunk so sentence offsets track VAD/chunk startMs.
+        val timedSources = expandTimedSentences(asrParts)
+        if (timedSources.isEmpty()) {
+            throw Exception(str(R.string.offline_split_empty))
+        }
+        if (timedSources.size == 1 && asrParts.size == 1) {
+            // single blob often means punctuation split failed — UI already has fallback copy path
+            android.util.Log.w(TAG, "punctuation split produced single sentence")
             _state.update {
                 it.copy(message = str(R.string.offline_split_fallback))
             }
         }
 
         checkCancel()
-        val sources = sentences.map { it.trim() }.filter { it.isNotEmpty() }
-        if (sources.isEmpty()) {
-            throw Exception(str(R.string.offline_split_empty))
-        }
-
+        val sources = timedSources.map { it.text }
+        val offsets = timedSources.map { it.offsetMs }
         val window = ArrayDeque<ContextTurn>()
         val windowSize = settings.contextWindowSize.coerceAtLeast(0)
         val segments = ArrayList<TranscriptSegment>(sources.size)
@@ -381,7 +389,7 @@ class OfflineReprocessPipeline(
                         cutReason = CutReason.Silence,
                         incomplete = false,
                         timestampMs = System.currentTimeMillis(),
-                        offsetMs = 0L
+                        offsetMs = offsets.getOrElse(idx) { 0L }
                     )
                 )
             }
@@ -392,6 +400,7 @@ class OfflineReprocessPipeline(
             for ((batchIdx, batch) in batches.withIndex()) {
                 checkCancel()
                 val batchStart = done
+                val batchOffsets = offsets.subList(batchStart, batchStart + batch.size).toList()
                 _state.update {
                     it.copy(
                         translateIndex = (batchStart + 1).coerceAtMost(total),
@@ -408,6 +417,7 @@ class OfflineReprocessPipeline(
                 }
                 val resolved = resolveBatchTranslations(
                     batch = batch,
+                    batchOffsets = batchOffsets,
                     batchIdx = batchIdx,
                     batchTotal = batches.size,
                     batchStart = batchStart,
@@ -630,6 +640,7 @@ class OfflineReprocessPipeline(
      */
     private suspend fun resolveBatchTranslations(
         batch: List<String>,
+        batchOffsets: List<Long>,
         batchIdx: Int,
         batchTotal: Int,
         batchStart: Int,
@@ -741,7 +752,7 @@ class OfflineReprocessPipeline(
                     cutReason = CutReason.Silence,
                     incomplete = incomplete,
                     timestampMs = System.currentTimeMillis(),
-                    offsetMs = 0L
+                    offsetMs = batchOffsets.getOrElse(i) { 0L }
                 )
             )
             if (!incomplete) {
@@ -870,10 +881,16 @@ class OfflineReprocessPipeline(
 
     private suspend fun awaitOnline() {
         if (network.isOnline()) return
-        while (!network.isOnline()) {
-            checkCancel()
-            delay(500)
-            network.refresh()
+        val ok = withTimeoutOrNull(AWAIT_ONLINE_TIMEOUT_MS) {
+            while (!network.isOnline()) {
+                checkCancel()
+                delay(500)
+                network.refresh()
+            }
+            true
+        }
+        if (ok != true) {
+            throw Exception(str(R.string.offline_offline))
         }
     }
 
@@ -988,8 +1005,48 @@ class OfflineReprocessPipeline(
 
     private class Retryable(cause: Exception) : Exception(cause.message, cause)
 
+    private data class TimedAsrPart(
+        val text: String,
+        val startMs: Long,
+        val durationMs: Long
+    )
+
+    private data class TimedSource(
+        val text: String,
+        val offsetMs: Long
+    )
+
+    /**
+     * Split each timed ASR chunk into sentences and assign offsets from chunk startMs,
+     * distributing evenly across the chunk duration when multiple sentences are produced.
+     */
+    private fun expandTimedSentences(parts: List<TimedAsrPart>): List<TimedSource> {
+        val out = ArrayList<TimedSource>()
+        for (p in parts) {
+            var sents = PunctuationSegmenter.split(p.text)
+                .map { it.trim() }
+                .filter { it.isNotEmpty() }
+            if (sents.isEmpty()) {
+                val t = p.text.trim()
+                if (t.isNotEmpty()) sents = listOf(t)
+            }
+            if (sents.isEmpty()) continue
+            val n = sents.size
+            for ((i, s) in sents.withIndex()) {
+                val offset = p.startMs + if (n <= 1 || p.durationMs <= 0L) {
+                    0L
+                } else {
+                    p.durationMs * i / n
+                }
+                out.add(TimedSource(s, offset.coerceAtLeast(0L)))
+            }
+        }
+        return out
+    }
+
     companion object {
         private const val TAG = "OfflineReprocess"
         private const val TITLE_CALL_TIMEOUT_MS = 20_000L
+        private const val AWAIT_ONLINE_TIMEOUT_MS = 120_000L
     }
 }

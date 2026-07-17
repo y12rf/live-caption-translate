@@ -45,12 +45,18 @@ class LlmClient(
             }
         }
 
-        // System / user templates from settings (editable); fill remaining placeholders.
-        val system = config.systemPrompt
-            .ifBlank { UserSettings.DEFAULT_LLM_SYSTEM_PROMPT }
-            .replace("{{from}}", from)
-            .replace("{{to}}", to)
-            .replace("{{glossary}}", "")
+        // System prompt must be fully rendered by UserSettings.toLlmConfig() (incl. glossary).
+        // Only re-fill from/to here; blank config falls back to default with empty glossary.
+        val system = if (config.systemPrompt.isBlank()) {
+            UserSettings.DEFAULT_LLM_SYSTEM_PROMPT
+                .replace("{{from}}", from)
+                .replace("{{to}}", to)
+                .replace("{{glossary}}", "")
+        } else {
+            config.systemPrompt
+                .replace("{{from}}", from)
+                .replace("{{to}}", to)
+        }
 
         val user = config.userPromptTemplate
             .ifBlank { UserSettings.DEFAULT_LLM_USER_PROMPT }
@@ -116,42 +122,41 @@ class LlmClient(
 
         val call = http.newCall(request)
         try {
-            val response = call.execute()
-            if (!response.isSuccessful) {
-                val code = response.code
-                val msg = response.body?.string().orEmpty().take(500)
-                response.close()
-                val hint = when (code) {
-                    401, 403 ->
-                        " 鉴权失败：检查 LLM API Key、LLM auth（Bearer/ApiKeyHeader）、" +
-                            "以及 API URL 是否指向正确服务。当前 auth=${config.authStyle} url=$url key=$keyPreview"
-                    else -> " url=$url auth=${config.authStyle}"
-                }
-                trySend(
-                    LlmStreamEvent.Error(
-                        IOException("LLM HTTP $code:$hint | body=$msg"),
-                        retryable = NetworkErrors.isRetryableHttp(code)
+            call.execute().use { response ->
+                if (!response.isSuccessful) {
+                    val code = response.code
+                    val msg = response.body?.string().orEmpty().take(500)
+                    val hint = when (code) {
+                        401, 403 ->
+                            " 鉴权失败：检查 LLM API Key、LLM auth（Bearer/ApiKeyHeader）、" +
+                                "以及 API URL 是否指向正确服务。当前 auth=${config.authStyle} url=$url key=$keyPreview"
+                        else -> " url=$url auth=${config.authStyle}"
+                    }
+                    trySend(
+                        LlmStreamEvent.Error(
+                            IOException("LLM HTTP $code:$hint | body=$msg"),
+                            retryable = NetworkErrors.isRetryableHttp(code)
+                        )
                     )
-                )
+                    close()
+                    return@callbackFlow
+                }
+                val source = response.body?.source()
+                if (source == null) {
+                    trySend(LlmStreamEvent.Error(IOException("Empty LLM body"), retryable = true))
+                    close()
+                    return@callbackFlow
+                }
+                val acc = StringBuilder()
+                for (payload in SseReader.readPayloads(source)) {
+                    val piece = extractDeltaContent(payload) ?: continue
+                    acc.append(piece)
+                    trySend(LlmStreamEvent.Delta(piece))
+                }
+                // Strip residual thinking wrappers that may span multiple deltas.
+                trySend(LlmStreamEvent.Completed(stripThinkingArtifacts(acc.toString())))
                 close()
-                return@callbackFlow
             }
-            val source = response.body?.source()
-            if (source == null) {
-                trySend(LlmStreamEvent.Error(IOException("Empty LLM body"), retryable = true))
-                close()
-                return@callbackFlow
-            }
-            val acc = StringBuilder()
-            for (payload in SseReader.readPayloads(source)) {
-                val piece = extractDeltaContent(payload) ?: continue
-                acc.append(piece)
-                trySend(LlmStreamEvent.Delta(piece))
-            }
-            // Strip residual thinking wrappers that may span multiple deltas.
-            trySend(LlmStreamEvent.Completed(stripThinkingArtifacts(acc.toString())))
-            response.close()
-            close()
         } catch (e: Exception) {
             if (call.isCanceled()) {
                 close()

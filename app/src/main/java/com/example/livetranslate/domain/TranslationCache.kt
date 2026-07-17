@@ -10,10 +10,10 @@ package com.example.livetranslate.domain
  * Lifecycle: clear when a session starts / ends ("用完就丢").
  */
 class TranslationCache(
-    private val maxSize: Int = DEFAULT_MAX_SIZE
+    val maxSize: Int = DEFAULT_MAX_SIZE
 ) {
     init {
-        require(maxSize > 0) { "maxSize must be > 0" }
+        require(maxSize >= 0) { "maxSize must be >= 0 (0 = disabled)" }
     }
 
     /**
@@ -61,9 +61,12 @@ class TranslationCache(
 
     val size: Int get() = map.size
 
-    fun get(key: Key): String? = map[key]
+    val enabled: Boolean get() = maxSize > 0
+
+    fun get(key: Key): String? = if (maxSize <= 0) null else map[key]
 
     fun put(key: Key, translation: String) {
+        if (maxSize <= 0) return
         val zh = translation.trim()
         if (zh.isEmpty()) return
         // Re-insert so this key counts as "newest" among the 50

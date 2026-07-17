@@ -47,35 +47,34 @@ class AsrClient(
 
         val call = http.newCall(request)
         try {
-            val response = call.execute()
-            if (!response.isSuccessful) {
-                val code = response.code
-                val msg = response.body?.string().orEmpty()
-                response.close()
-                trySend(
-                    AsrStreamEvent.Error(
-                        IOException("ASR HTTP $code: $msg"),
-                        retryable = NetworkErrors.isRetryableHttp(code)
+            call.execute().use { response ->
+                if (!response.isSuccessful) {
+                    val code = response.code
+                    val msg = response.body?.string().orEmpty()
+                    trySend(
+                        AsrStreamEvent.Error(
+                            IOException("ASR HTTP $code: $msg"),
+                            retryable = NetworkErrors.isRetryableHttp(code)
+                        )
                     )
-                )
+                    close()
+                    return@callbackFlow
+                }
+                val source = response.body?.source()
+                if (source == null) {
+                    trySend(AsrStreamEvent.Error(IOException("Empty ASR body"), retryable = true))
+                    close()
+                    return@callbackFlow
+                }
+                var acc = ""
+                for (payload in SseReader.readPayloads(source)) {
+                    val piece = extractText(payload) ?: continue
+                    acc = AsrTextMerger.merge(acc, piece)
+                    trySend(AsrStreamEvent.Delta(acc))
+                }
+                trySend(AsrStreamEvent.Completed(acc))
                 close()
-                return@callbackFlow
             }
-            val source = response.body?.source()
-            if (source == null) {
-                trySend(AsrStreamEvent.Error(IOException("Empty ASR body"), retryable = true))
-                close()
-                return@callbackFlow
-            }
-            var acc = ""
-            for (payload in SseReader.readPayloads(source)) {
-                val piece = extractText(payload) ?: continue
-                acc = AsrTextMerger.merge(acc, piece)
-                trySend(AsrStreamEvent.Delta(acc))
-            }
-            trySend(AsrStreamEvent.Completed(acc))
-            response.close()
-            close()
         } catch (e: Exception) {
             if (call.isCanceled()) {
                 close()

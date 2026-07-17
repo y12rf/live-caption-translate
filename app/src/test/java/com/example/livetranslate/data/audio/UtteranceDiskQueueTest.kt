@@ -108,6 +108,32 @@ class UtteranceDiskQueueTest {
         assertNull(q.poll())
     }
 
+    @Test
+    fun poll_skipsCorruptAndContinues() {
+        val root = tmp.newFolder("pending6")
+        val q = UtteranceDiskQueue(root)
+        q.enqueue(utt(offsetMs = 1, pcm = byteArrayOf(1)))
+        q.enqueue(utt(offsetMs = 2, pcm = byteArrayOf(2)))
+        // Corrupt the FIFO head meta
+        val head = root.listFiles()!!.filter { it.isDirectory }.minBy { it.name }
+        File(head, "meta.bin").writeBytes(byteArrayOf(1, 2, 3))
+        // Must skip corrupt and return the next valid item (not stall forever)
+        val got = q.poll()
+        assertEquals(2L, got!!.offsetMs)
+        assertNull(q.poll())
+    }
+
+    @Test
+    fun poll_filtersBySessionEpoch() {
+        val root = tmp.newFolder("pending7")
+        val q = UtteranceDiskQueue(root)
+        q.enqueue(utt(offsetMs = 10, pcm = byteArrayOf(1)), sessionEpoch = 1L)
+        q.enqueue(utt(offsetMs = 20, pcm = byteArrayOf(2)), sessionEpoch = 2L)
+        assertEquals(20L, q.poll(sessionEpoch = 2L)!!.offsetMs)
+        assertNull(q.poll(sessionEpoch = 2L))
+        assertEquals(10L, q.poll(sessionEpoch = 1L)!!.offsetMs)
+    }
+
     private fun utt(offsetMs: Long, pcm: ByteArray) =
         UtteranceAudio(pcm, sampleRate = 16_000, reason = CutReason.Silence, offsetMs = offsetMs)
 

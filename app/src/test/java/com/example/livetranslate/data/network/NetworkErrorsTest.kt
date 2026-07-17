@@ -30,6 +30,9 @@ class NetworkErrorsTest {
                 IOException("wrap", SocketTimeoutException("inner"))
             )
         )
+        // Unknown / non-transport errors must not burn retries
+        assertFalse(NetworkErrors.isRetryableThrowable(IllegalStateException("bug")))
+        assertFalse(NetworkErrors.isRetryableThrowable(IOException("unexpected parse failure")))
     }
 
     @Test

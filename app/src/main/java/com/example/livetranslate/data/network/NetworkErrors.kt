@@ -31,11 +31,13 @@ object NetworkErrors {
                     ) {
                         return true
                     }
+                    // Other IOException subclasses may still match via cause; keep walking.
                 }
             }
             cur = cur.cause
         }
-        return true // unknown IO → retry (auth errors come as non-retryable HTTP)
+        // Unknown / parse / illegal-state errors are not transient — do not burn retries.
+        return false
     }
 
     fun userMessage(t: Throwable, prefix: String = ""): String {

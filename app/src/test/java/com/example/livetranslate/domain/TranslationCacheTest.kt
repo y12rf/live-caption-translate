@@ -86,4 +86,14 @@ class TranslationCacheTest {
         cache.put(k, "  ")
         assertTrue(!cache.contains(k))
     }
+
+    @Test
+    fun maxSizeZero_disabled() {
+        val cache = TranslationCache(0)
+        assertTrue(!cache.enabled)
+        val k = TranslationCache.Key.of("x", "en", "zh", "m")!!
+        cache.put(k, "某")
+        assertNull(cache.get(k))
+        assertEquals(0, cache.size)
+    }
 }

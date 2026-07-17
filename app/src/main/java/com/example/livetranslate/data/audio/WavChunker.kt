@@ -3,7 +3,7 @@ package com.example.livetranslate.data.audio
 import android.content.Context
 import com.example.livetranslate.data.settings.UserSettings
 import com.example.livetranslate.domain.model.UtteranceAudio
-import kotlinx.coroutines.flow.toList
+import kotlinx.coroutines.flow.collect
 import java.io.File
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
@@ -30,6 +30,11 @@ object WavChunker {
         /** How many VAD utterances were merged into this ASR batch (0 if time-sliced). */
         val utteranceCount: Int = 0
     ) {
+        /** Duration of this PCM blob in ms (16-bit mono). */
+        val durationMs: Long
+            get() = if (sampleRate <= 0 || pcm.isEmpty()) 0L
+            else (pcm.size / 2L) * 1000L / sampleRate
+
         override fun equals(other: Any?): Boolean {
             if (this === other) return true
             if (other !is PcmChunk) return false
@@ -53,8 +58,9 @@ object WavChunker {
     }
 
     /**
-     * Silero VAD over the whole WAV, then merge every [utterancesPerBatch] cuts into one PCM blob for ASR.
-     * Last batch may be shorter than [utterancesPerBatch].
+     * Silero VAD over the whole WAV, packing every [utterancesPerBatch] cuts into one ASR blob.
+     * Streams VAD output so only one batch of utterances is held in RAM at a time
+     * (avoids OOM on long lectures). Last batch may be shorter than [utterancesPerBatch].
      */
     suspend fun chunkByVad(
         file: File,
@@ -65,8 +71,35 @@ object WavChunker {
     ): List<PcmChunk> {
         require(utterancesPerBatch > 0)
         val segmenter = FileAudioSegmenter(appContext = appContext)
-        val utterances = segmenter.segment(file, settings, onProgress).toList()
-        return packVadUtterances(utterances, utterancesPerBatch)
+        val batch = ArrayList<UtteranceAudio>(utterancesPerBatch)
+        val provisional = ArrayList<PcmChunk>()
+        var index = 0
+        segmenter.segment(file, settings, onProgress).collect { utt ->
+            batch.add(utt)
+            if (batch.size >= utterancesPerBatch) {
+                provisional.add(packGroup(batch, index, totalPlaceholder = -1))
+                batch.clear()
+                index++
+            }
+        }
+        if (batch.isNotEmpty()) {
+            provisional.add(packGroup(batch, index, totalPlaceholder = -1))
+            batch.clear()
+        }
+        val total = provisional.size
+        if (total == 0) return emptyList()
+        return provisional.map { c ->
+            c.copy(total = total) // re-wrap to fix total; pcm shared is fine
+        }.mapIndexed { i, c ->
+            PcmChunk(
+                pcm = c.pcm,
+                sampleRate = c.sampleRate,
+                index = i,
+                total = total,
+                startMs = c.startMs,
+                utteranceCount = c.utteranceCount
+            )
+        }
     }
 
     /**
@@ -80,23 +113,31 @@ object WavChunker {
         if (utterances.isEmpty()) return emptyList()
         val groups = utterances.chunked(utterancesPerBatch)
         return groups.mapIndexed { index, group ->
-            val sampleRate = group.first().sampleRate
-            val totalBytes = group.sumOf { it.pcm.size }
-            val pcm = ByteArray(totalBytes)
-            var pos = 0
-            for (u in group) {
-                System.arraycopy(u.pcm, 0, pcm, pos, u.pcm.size)
-                pos += u.pcm.size
-            }
-            PcmChunk(
-                pcm = pcm,
-                sampleRate = sampleRate,
-                index = index,
-                total = groups.size,
-                startMs = group.first().offsetMs.coerceAtLeast(0L),
-                utteranceCount = group.size
-            )
+            packGroup(group, index, totalPlaceholder = groups.size)
         }
+    }
+
+    private fun packGroup(
+        group: List<UtteranceAudio>,
+        index: Int,
+        totalPlaceholder: Int
+    ): PcmChunk {
+        val sampleRate = group.first().sampleRate
+        val totalBytes = group.sumOf { it.pcm.size }
+        val pcm = ByteArray(totalBytes)
+        var pos = 0
+        for (u in group) {
+            System.arraycopy(u.pcm, 0, pcm, pos, u.pcm.size)
+            pos += u.pcm.size
+        }
+        return PcmChunk(
+            pcm = pcm,
+            sampleRate = sampleRate,
+            index = index,
+            total = totalPlaceholder.coerceAtLeast(0),
+            startMs = group.first().offsetMs.coerceAtLeast(0L),
+            utteranceCount = group.size
+        )
     }
 
     /**
