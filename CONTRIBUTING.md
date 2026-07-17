@@ -16,7 +16,7 @@ Thanks for helping improve Live Translate.
 
 - Kotlin + Jetpack Compose for UI.
 - UI strings go in `app/src/main/res/values/strings.xml` **and** `values-zh/`.
-- Settings defaults live in `UserSettings`; keep `docs/DEFERRED_DECISIONS.md` roughly in sync when defaults change.
+- Settings defaults live in `UserSettings` (and Settings UI); change defaults carefully and cover with tests when practical.
 - Prefer small, focused PRs with tests for domain / controller logic when practical.
 
 ## Pull requests

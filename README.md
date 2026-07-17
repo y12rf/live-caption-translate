@@ -111,10 +111,8 @@ See [SECURITY.md](SECURITY.md). Never commit API keys or keystores.
 
 ## Docs
 
-- Design notes: `docs/superpowers/specs/`
-- Implementation plans: `docs/superpowers/plans/`
-- Default decision snapshot: `docs/DEFERRED_DECISIONS.md` (code `UserSettings` wins on conflict)
-- Third-party: [NOTICE](NOTICE)
+- Third-party notices: [NOTICE](NOTICE)
+- Security: [SECURITY.md](SECURITY.md)
 
 ## Contributing
 

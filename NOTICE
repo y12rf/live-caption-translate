@@ -1,18 +1,126 @@
 Live Translate
 Copyright (c) 2026 Live Translate contributors
 
-This product includes third-party software:
+This product includes third-party software. Licenses and notices for those
+components are summarized below. For the authoritative text, see each
+upstream project. Dependency versions are declared in `app/build.gradle.kts`.
 
-### android-vad (Silero)
-- Used for on-device voice activity detection.
-- See the dependency’s upstream license (via Gradle).
+------------------------------------------------------------------------------
+android-vad (Silero module)
+------------------------------------------------------------------------------
+Project:  https://github.com/gkonovalov/android-vad
+Author:   Georgiy Konovalov
+Artifact: com.github.gkonovalov.android-vad:silero:2.0.6 (via JitPack)
+Use:      On-device voice activity detection (Silero DNN / ONNX)
+License:  MIT License
 
-### FFmpeg (via ffmpeg-kit / native libraries as integrated by the project)
-- Used for file import audio conversion.
-- FFmpeg is licensed under LGPL/GPL depending on build configuration of the bundled kit.
-- Review the FFmpeg / ffmpeg-kit licenses before redistributing binaries commercially.
+Copyright 2023 Georgiy Konovalov
 
-### AndroidX, OkHttp, Kotlin, Room, Compose
-- Licensed under their respective open-source licenses (typically Apache 2.0).
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
 
-Full dependency licenses are resolved through Gradle and each upstream project.
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+------------------------------------------------------------------------------
+Silero VAD (model)
+------------------------------------------------------------------------------
+Project:  https://github.com/snakers4/silero-vad
+Author:   Silero Team / snakers4
+Use:      Pre-trained VAD model used by the android-vad Silero module
+License:  MIT License
+          https://github.com/snakers4/silero-vad/blob/master/LICENSE
+
+------------------------------------------------------------------------------
+FFmpeg Kit (audio package) and FFmpeg
+------------------------------------------------------------------------------
+Artifact: com.antonkarpenko:ffmpeg-kit-audio:2.2.1 (Maven Central)
+          Community rebuild of the retired arthenica/ffmpeg-kit audio package
+          (FFmpeg 8.x audio-focused build)
+Upstream: https://github.com/arthenica/ffmpeg-kit (original, retired)
+          https://github.com/sk3llo/ffmpeg-kit-flutter (publisher SCM for this
+          Maven coordinate)
+Use:      Local file import — convert audio/video to 16 kHz mono WAV for VAD
+FFmpeg:   https://ffmpeg.org/
+          https://www.ffmpeg.org/legal.html
+
+License notes:
+  - The FFmpeg Kit library is typically LGPL-3.0 by default; Maven metadata for
+    this artifact also lists GPL-3.0. Exact terms depend on how the bundled
+    native libraries were configured.
+  - FFmpeg itself is LGPL-2.1+ by default; optional components may be GPL.
+  - Before redistributing binaries (APK/AAB) commercially, review the licenses
+    of the exact AAR you ship and comply with LGPL/GPL obligations (source
+    offer, notices, etc. as applicable).
+
+Full license texts:
+  - LGPL-3.0: https://www.gnu.org/licenses/lgpl-3.0.html
+  - GPL-3.0:  https://www.gnu.org/licenses/gpl-3.0.html
+  - FFmpeg:   https://github.com/FFmpeg/FFmpeg/blob/master/LICENSE.md
+
+------------------------------------------------------------------------------
+AndroidX / Jetpack (including Compose, Room, DataStore, Lifecycle, Navigation)
+------------------------------------------------------------------------------
+Project:  https://developer.android.com/jetpack
+Artifacts (examples):
+  - androidx.core:core-ktx
+  - androidx.appcompat:appcompat
+  - androidx.activity:activity-compose
+  - androidx.lifecycle:lifecycle-*
+  - androidx.compose.* (via compose BOM)
+  - androidx.navigation:navigation-compose
+  - androidx.datastore:datastore-preferences
+  - androidx.room:room-runtime / room-ktx / room-compiler (KSP)
+License:  Apache License 2.0
+          https://www.apache.org/licenses/LICENSE-2.0
+
+------------------------------------------------------------------------------
+Kotlin and Kotlin coroutines
+------------------------------------------------------------------------------
+Project:  https://github.com/JetBrains/kotlin
+          https://github.com/Kotlin/kotlinx.coroutines
+Artifacts:
+  - org.jetbrains.kotlin:kotlin-stdlib (and related)
+  - org.jetbrains.kotlinx:kotlinx-coroutines-android
+  - org.jetbrains.kotlinx:kotlinx-coroutines-test (tests)
+License:  Apache License 2.0
+
+------------------------------------------------------------------------------
+OkHttp
+------------------------------------------------------------------------------
+Project:  https://github.com/square/okhttp
+Artifacts:
+  - com.squareup.okhttp3:okhttp
+  - com.squareup.okhttp3:mockwebserver (tests)
+License:  Apache License 2.0
+
+------------------------------------------------------------------------------
+JUnit (tests only)
+------------------------------------------------------------------------------
+Project:  https://junit.org/
+Artifact: junit:junit
+License:  Eclipse Public License 1.0
+          https://www.eclipse.org/legal/epl-v10.html
+
+------------------------------------------------------------------------------
+
+This is not an exhaustive list of every transitive dependency pulled by Gradle.
+Additional libraries (for example ONNX Runtime Mobile via android-vad:silero)
+are licensed under their respective upstream terms. Resolve the full tree with:
+
+  gradlew.bat :app:dependencies
+
+Nothing in this NOTICE modifies the MIT License of Live Translate itself
+(see LICENSE). LGPL/GPL components remain under their own licenses.

@@ -1,35 +1,223 @@
-# IDE / tooling
+# -----------------------------------------------------------------------------
+# IDE / editors (absolute paths, device serials, run configs)
+# -----------------------------------------------------------------------------
+.idea/
+*.iml
+*.ipr
+*.iws
+.project
+.classpath
+.settings/
+.vscode/
+*.code-workspace
+*.swp
+*~
+*.bak
+*.orig
+.fleet/
+.history/
+
+# Design notes / agent plans — keep local, do not publish
+docs/
+
+# Agent / AI tooling local state (paths, transcripts, secrets)
 .superpowers/
 .worktrees/
-.idea/
+.claude/
+.cursor/
+.codex/
+.grok/
+.continue/
+.windsurf/
+.aider*
+.agent/
+.agents/
+.specs/
+.scratch/
+tmp/
+temp/
+.cache/
+
+# -----------------------------------------------------------------------------
+# Android / Gradle local machine state
+# -----------------------------------------------------------------------------
 .gradle/
-*.iml
-.DS_Store
 .kotlin/
+local.properties
+**/local.properties
 captures/
 .externalNativeBuild/
 .cxx/
+*.hprof
+*.navigation/
 
-# Build outputs
+# Machine-specific Gradle overrides
+gradle.properties.local
+*.gradle.local
+
+# -----------------------------------------------------------------------------
+# Build outputs & packaging artifacts
+# -----------------------------------------------------------------------------
 **/build/
+bin/
+out/
 *.apk
 *.ap_
 *.aab
+*.aar
 *.dex
 *.class
+*.so
+*.o
+*.o.d
+*.jar
+!gradle/wrapper/gradle-wrapper.jar
 
-# Local machine / secrets (never commit)
-local.properties
+# R8 / ProGuard / native mapping (package layout & symbols)
+mapping.txt
+**/mapping.txt
+seeds.txt
+unused.txt
+resources.txt
+**/outputs/**/mapping/
+*.mapping
+
+# Reports outside build/ (build/ already covered)
+lint/reports/
+test-results/
+**/jacoco/
+coverage/
+*.exec
+
+# -----------------------------------------------------------------------------
+# Signing & secrets — NEVER commit
+# -----------------------------------------------------------------------------
 *.jks
 *.keystore
+*.p12
+*.pfx
+*.pem
+*.key
+*.crt
+*.cer
+*.der
+*.rsa
+*.dsa
+debug.keystore
+release.keystore
+upload-keystore*
+
 secrets.properties
+secret.properties
+signing.properties
+keystore.properties
+key.properties
+api-keys.properties
+credentials.properties
+*.secret
+*.secrets
 .env
 .env.*
+!.env.example
+!.env.sample
+.envrc
+*.env.local
 
+# Cloud / store credentials
+google-services.json
+GoogleService-Info.plist
+service-account*.json
+**/play-store*.json
+**/play-api*.json
+**/gcp-*.json
+credentials.json
+client_secret*.json
+oauth*.json
+token.json
+*.token
+
+# Personal notes / private dirs that often hold keys or URLs
+private/
+secrets/
+keys/
+certs/
+.local/
+*.local.md
+NOTES.local.md
+TODO.local.md
+
+# -----------------------------------------------------------------------------
+# Media / session data (real speech, PII, large dumps)
+# -----------------------------------------------------------------------------
+*.wav
+*.mp3
+*.m4a
+*.aac
+*.flac
+*.ogg
+*.opus
+*.pcm
+*.webm
+*.mp4
+*.mkv
+*.3gp
+*.srt
+*.vtt
+
+# Intentional fixtures under source sets (opt-in — un-ignore whole trees)
+!app/src/**/fixtures/
+!app/src/**/fixtures/**
+!app/src/**/testdata/
+!app/src/**/testdata/**
+
+# Common dump / export dirs
+recordings/
+sessions/
+exports/
+downloads/
+sample-audio/
+test-audio/
+
+# Fastlane local output
+fastlane/screenshots/
+fastlane/report.xml
+fastlane/Preview.html
+fastlane/test_output/
+
+# -----------------------------------------------------------------------------
 # Logs & crash dumps
+# -----------------------------------------------------------------------------
 *.log
-*.hprof
+*.log.*
+logs/
+hs_err_pid*
+replay_pid*
+*.stackdump
+bugreport*.zip
+bugreport*.txt
 
-# OS
+# -----------------------------------------------------------------------------
+# OS junk
+# -----------------------------------------------------------------------------
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
 Thumbs.db
 desktop.ini
+$RECYCLE.BIN/
+
+# -----------------------------------------------------------------------------
+# Misc tooling / accidental archives
+# -----------------------------------------------------------------------------
+*.rej
+node_modules/
+.venv/
+venv/
+__pycache__/
+*.pyc
+# Manual AAR / FFmpeg probe zips
+*.zip
+!gradle/wrapper/**
