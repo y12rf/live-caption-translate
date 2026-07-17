@@ -13,7 +13,7 @@ import com.konovalov.vad.silero.config.SampleRate
  * Library owns hangover timing:
  * - [speechDurationMs] — min speech run before isSpeech stays true (anti-blip)
  * - [silenceDurationMs] — min silence after speech before isSpeech goes false
- *   (end-of-utterance hangover; settings [UserSettings.silenceMs], default 300)
+ *   (end-of-utterance hangover; settings [UserSettings.silenceMs], default 260)
  *
  * Frame size fixed at 512 samples @ 16 kHz (~32 ms).
  * [EnergyVad] only edge-detects speech→silence and enforces max/min utterance length.
@@ -58,8 +58,8 @@ class SileroSpeechClassifier(
         /** Library recommended Speech Duration (anti single-frame false start). */
         const val DEFAULT_SPEECH_DURATION_MS = 50
 
-        /** Library recommended Silence Duration (end-of-utterance hangover). */
-        const val DEFAULT_SILENCE_DURATION_MS = 300
+        /** Default Silence Duration hangover (settings default 260ms). */
+        const val DEFAULT_SILENCE_DURATION_MS = 260
     }
 }
 

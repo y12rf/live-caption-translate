@@ -676,9 +676,10 @@ fun LiveTranslateScreen(
                     confirmButton = {
                         TextButton(onClick = {
                             stopDialogOpen = false
-                            if (state.audioSource == AudioSourceType.File) {
-                                viewModel.stop(drain = true)
-                            } else {
+                            // Always stop the orchestrator from UI; also notify FGS so it
+                            // can tear down MediaProjection when Idle (mic/internal).
+                            viewModel.stop(drain = true)
+                            if (state.audioSource != AudioSourceType.File) {
                                 RecordingService.stop(context, drain = true)
                             }
                             SubtitleOverlayService.stop(context)
@@ -694,9 +695,9 @@ fun LiveTranslateScreen(
                     dismissButton = {
                         TextButton(onClick = {
                             stopDialogOpen = false
-                            if (state.audioSource == AudioSourceType.File) {
-                                viewModel.stop(drain = false)
-                            } else {
+                            // Immediate end: cancel in-flight ASR/LLM without waiting.
+                            viewModel.stop(drain = false)
+                            if (state.audioSource != AudioSourceType.File) {
                                 RecordingService.stop(context, drain = false)
                             }
                             SubtitleOverlayService.stop(context)

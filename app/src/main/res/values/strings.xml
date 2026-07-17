@@ -75,7 +75,7 @@
     <string name="history_delete_confirm_title">Delete this session?</string>
     <string name="history_delete_confirm_body">Transcript will be deleted. The audio file is removed only if no other session shares it. This cannot be undone.</string>
     <string name="history_deleted">Deleted</string>
-    <string name="history_tap_segment_hint">Tap to copy · long-press to edit · ▶ seeks audio</string>
+    <string name="history_tap_segment_hint">Tap to copy · long-press to edit · swipe to multi-select · ▶ seeks audio</string>
     <string name="history_segment_copied">Segment copied</string>
     <string name="history_edit_segment_title">Edit segment</string>
     <string name="history_edit_title_dialog">Edit title</string>
@@ -84,6 +84,21 @@
     <string name="history_search_action">Search</string>
     <string name="history_playback_expand">Show seek bar</string>
     <string name="history_playback_hide">Hide seek bar</string>
+    <string name="history_segment_delete">Delete line</string>
+    <string name="history_segment_retranslate">Re-translate</string>
+    <string name="history_segment_delete_confirm_title">Delete selected lines?</string>
+    <string name="history_segment_delete_confirm_body">Delete %1$d dialogue line(s) from this session. Cannot be undone.</string>
+    <string name="history_segment_deleted">Deleted %1$d line(s)</string>
+    <string name="history_segment_retranslated">Re-translated %1$d · failed %2$d</string>
+    <string name="history_segment_retranslating">Re-translating…</string>
+    <string name="history_selection_count">%1$d selected</string>
+    <string name="history_select_all">Select all</string>
+    <string name="history_selection_cancel">Cancel</string>
+    <string name="history_segment_llm_key_missing">Set LLM API Key in Settings to re-translate</string>
+    <string name="history_segment_asr_only">Turn off ASR-only mode to re-translate</string>
+    <string name="history_segment_retranslate_failed">Re-translate failed</string>
+    <string name="history_silence_blank"> </string>
+    <string name="history_segment_menu">Line actions</string>
     <string name="label_source">EN</string>
     <string name="label_translation">ZH</string>
     <string name="segment_incomplete">(incomplete)</string>
@@ -277,7 +292,7 @@
     <string name="settings_overlay_marquee_finish">Finish scroll before next line</string>
     <string name="settings_overlay_show_border">Show panel border</string>
     <string name="settings_overlay_show_divider">Show EN/ZH divider</string>
-    <string name="settings_info_overlay_marquee">ScrollLine only:\n• Speed — pixels per second (20–160, default 60)\n• Finish before next — wait until the current line finishes scrolling before showing the next committed sentence (avoids mid-scroll jumps). Streaming partials are not shown in ScrollLine.</string>
+    <string name="settings_info_overlay_marquee">ScrollLine only:\n• Speed — pixels per second (20–160, default 60)\n• Finish before next — wait until the current line finishes scrolling before showing the next committed sentence (avoids mid-scroll jumps). When the next sentence is already recognized, scroll automatically speeds up to catch up. Streaming partials are not shown in ScrollLine.</string>
     <string name="settings_live_font_sp">Home panel font size (sp)</string>
     <string name="settings_overlay_order_title">Caption order</string>
     <string name="settings_overlay_order_info">On (default): translation on top, source below.\nOff: source on top, translation below.</string>
@@ -310,8 +325,8 @@
     <string name="settings_info_languages">Languages sent to ASR / LLM (not the app UI language).\nUse short codes such as en, zh, ja, or names your API accepts.</string>
     <string name="settings_info_input_lang">Source language for ASR and LLM (e.g. en).</string>
     <string name="settings_info_output_lang">Target language for translation (e.g. zh). Ignored in ASR-only mode.</string>
-    <string name="settings_info_vad">Silero DNN VAD (library hangover) + packer:\n• Silence ms — Silero silenceDuration (default 300; hangover after last speech)\n• Max utterance ms — force cut if no pause\n• Min utterance ms — silence cuts shorter than this merge into the next speech (not dropped)\n• Silero mode — NORMAL / AGGRESSIVE / VERY_AGGRESSIVE\n• Context window N — LLM history turns</string>
-    <string name="settings_info_silence_ms">Silero library Silence Duration (ms): how long isSpeech stays true after speech ends before the packer cuts. Default 300 (android-vad recommendation).</string>
+    <string name="settings_info_vad">Silero DNN VAD (library hangover) + packer:\n• Silence ms — Silero silenceDuration (default 260; hangover after last speech)\n• Max utterance ms — force cut if no pause\n• Min utterance ms — silence cuts shorter than this merge into the next speech (default 1500)\n• Silero mode — NORMAL / AGGRESSIVE / VERY_AGGRESSIVE\n• Context window N — LLM history turns</string>
+    <string name="settings_info_silence_ms">Silero library Silence Duration (ms): how long isSpeech stays true after speech ends before the packer cuts. Default 260.</string>
     <string name="settings_info_max_utt_ms">Force-cut length if speech never pauses (ms). Lower = faster latency, more cuts. App-layer (not Silero). Always flushes even if under min.</string>
     <string name="settings_info_min_utt_ms">If a silence cut’s voiced length is shorter than this (ms), PCM is held and merged into the next speech run (not discarded). Stop/max still flush. 0 = no minimum.</string>
     <string name="settings_info_energy">RMS energy gate for speech vs silence. Raise in noisy rooms; lower if soft speech is missed.</string>

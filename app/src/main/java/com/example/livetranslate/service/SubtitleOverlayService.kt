@@ -60,7 +60,10 @@ class SubtitleOverlayService : Service() {
     private var layoutParams: WindowManager.LayoutParams? = null
 
     private var overlaySettings: UserSettings = UserSettings()
-    private val scrollController = OverlayScrollController { cap -> showCaption(cap) }
+    private val scrollController = OverlayScrollController(
+        onShow = { cap -> showCaption(cap) },
+        onBacklog = { depth -> applyCatchUpSpeed(depth) }
+    )
     /** How many marquee lines still need to finish for the current caption. */
     private var pendingLineFinishes = 0
 
@@ -235,6 +238,12 @@ class SubtitleOverlayService : Service() {
         val showZh = mode != OverlayTextMode.SourceOnly &&
             !overlaySettings.asrOnlyMode &&
             cap.zh.isNotBlank()
+        // Start each caption at the user base speed; backlog callback may boost after
+        val baseSpeed = overlaySettings.overlayMarqueeSpeed
+            .coerceIn(20, CaptionLineView.SETTINGS_MAX_SPEED.toInt())
+            .toFloat()
+        enView?.speedPxPerSec = baseSpeed
+        zhView?.speedPxPerSec = baseSpeed
         // Count lines that will report finish (marquee or dwell)
         pendingLineFinishes = 0
         if (layout == OverlayLayoutMode.ScrollLine) {
@@ -251,6 +260,22 @@ class SubtitleOverlayService : Service() {
         if (layout == OverlayLayoutMode.FullSentence) {
             pendingLineFinishes = 0
         }
+    }
+
+    /**
+     * When the next committed sentence is already queued, speed up the active
+     * marquee so the overlay catches up instead of lagging further behind speech.
+     */
+    private fun applyCatchUpSpeed(queueDepth: Int) {
+        if (queueDepth <= 0) return
+        if (overlaySettings.overlayLayoutModeEnum() != OverlayLayoutMode.ScrollLine) return
+        if (!overlaySettings.overlayMarqueeFinishBeforeNext) return
+        val base = overlaySettings.overlayMarqueeSpeed
+            .coerceIn(20, CaptionLineView.SETTINGS_MAX_SPEED.toInt())
+            .toFloat()
+        val boosted = OverlayScrollController.catchUpSpeed(base, queueDepth)
+        enView?.applySpeedNow(boosted)
+        zhView?.applySpeedNow(boosted)
     }
 
     private fun showCaptionImmediate(cap: OverlayCaption) {

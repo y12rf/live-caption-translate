@@ -60,16 +60,16 @@ data class UserSettings(
     val outputLanguage: String = "zh",
     /**
      * Silero library [silenceDurationMs]: hangover after last speech before isSpeech goes false.
-     * Default 300ms matches android-vad recommended Silence Duration.
+     * Default 260ms.
      */
-    val silenceMs: Int = 300,
+    val silenceMs: Int = 260,
     val maxUtteranceMs: Int = 4_500,
     /**
      * Minimum voiced duration for a silence cut to emit.
      * Shorter cuts **hold PCM and merge into the next speech run** (not discarded).
      * Stop / max-duration always flush. 0 = no minimum.
      */
-    val minUtteranceMs: Int = 1_700,
+    val minUtteranceMs: Int = 1_500,
     /**
      * Silero VAD confidence mode: [SileroVadMode] name
      * (NORMAL / AGGRESSIVE / VERY_AGGRESSIVE).

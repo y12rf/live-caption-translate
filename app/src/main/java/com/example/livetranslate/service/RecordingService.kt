@@ -54,16 +54,30 @@ class RecordingService : Service() {
     private val mainHandler = Handler(Looper.getMainLooper())
     /** Ignore initial Idle emissions so we don't release MediaProjection before start(). */
     private var sessionEverNonIdle = false
+    /**
+     * True while we are tearing down MediaProjection ourselves (session end / start failure).
+     * [MediaProjection.Callback.onStop] is often delivered async on [mainHandler] *after*
+     * [MediaProjection.stop]; must not treat that as a user/system revoke mid-session.
+     */
+    @Volatile
+    private var releasingProjection = false
 
     private var wakeLock: PowerManager.WakeLock? = null
     private var wifiLock: WifiManager.WifiLock? = null
 
     private val projectionCallback = object : MediaProjection.Callback() {
         override fun onStop() {
+            if (releasingProjection) {
+                Log.i(TAG, "MediaProjection stopped (local release) — ignore")
+                return
+            }
             Log.i(TAG, "MediaProjection stopped by system")
             try {
                 val controller = (application as LiveTranslateApp).container.sessionController
-                controller.pause()
+                // Only pause a live session; never flip Idle → Paused after stop finished.
+                if (controller.state.value.phase != SessionPhase.Idle) {
+                    controller.pause()
+                }
             } catch (e: Exception) {
                 Log.w(TAG, "onStop handling failed", e)
             }
@@ -81,7 +95,27 @@ class RecordingService : Service() {
         val app = application as LiveTranslateApp
         val controller = app.container.sessionController
 
-        when (intent?.action) {
+        // START_STICKY redelivery uses a null intent. Never treat that as "start mic/internal"
+        // or users see "录音启动失败" right after Stop (no MediaProjection token left).
+        if (intent == null) {
+            Log.w(TAG, "onStartCommand null intent (sticky restart) — not auto-starting capture")
+            val phase = controller.state.value.phase
+            if (phase == SessionPhase.Idle) {
+                releaseKeepAliveLocks()
+                releaseProjection()
+                stopSelf()
+                return START_NOT_STICKY
+            }
+            // Session still active after process death: keep service alive but do not
+            // invent a new capture path without an explicit ACTION_START / RESUME.
+            try {
+                refreshLocalNotification(controller)
+            } catch (_: Exception) {
+            }
+            return START_STICKY
+        }
+
+        when (intent.action) {
             ACTION_PAUSE -> {
                 try {
                     controller.pause()
@@ -111,8 +145,11 @@ class RecordingService : Service() {
                     releaseProjection()
                     stopOverlay()
                     stopSelf()
+                    return START_NOT_STICKY
                 }
-                return START_STICKY
+                // Prefer NOT_STICKY so system does not recreate us with a null intent
+                // after stopSelf once Idle is reached.
+                return START_NOT_STICKY
             }
             ACTION_TOGGLE_OVERLAY_LOCK -> {
                 try {
@@ -128,8 +165,8 @@ class RecordingService : Service() {
                 refreshLocalNotification(controller)
                 return START_STICKY
             }
-            ACTION_START, null -> {
-                val source = intent?.getStringExtra(EXTRA_AUDIO_SOURCE)
+            ACTION_START -> {
+                val source = intent.getStringExtra(EXTRA_AUDIO_SOURCE)
                     ?.let { runCatching { AudioSourceType.valueOf(it) }.getOrNull() }
                     ?: AudioSourceType.Microphone
 
@@ -143,9 +180,13 @@ class RecordingService : Service() {
                     stopSelf()
                     return START_NOT_STICKY
                 }
+                return START_STICKY
+            }
+            else -> {
+                Log.w(TAG, "unknown action=${intent.action}")
+                return START_NOT_STICKY
             }
         }
-        return START_STICKY
     }
 
     private fun startRecordingSession(
@@ -316,6 +357,7 @@ class RecordingService : Service() {
     }
 
     private fun releaseProjection() {
+        releasingProjection = true
         val p = projection
         projection = null
         if (p != null) {
@@ -333,6 +375,10 @@ class RecordingService : Service() {
             ?.sessionController
             ?.setMediaProjection(null)
         ProjectionTokenStore.clear()
+        // Callback may still be queued on mainHandler after stop(); clear flag after drain.
+        mainHandler.post {
+            releasingProjection = false
+        }
     }
 
     private fun stopOverlay() {

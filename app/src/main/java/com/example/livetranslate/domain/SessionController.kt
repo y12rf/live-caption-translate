@@ -100,6 +100,8 @@ class SessionController(
             audio.captureError.collect { msg ->
                 if (msg != null) {
                     orchestrator.reportCaptureError(msg)
+                    // Allow a later identical failure to re-emit after intentional stop/start.
+                    audio.clearError()
                 }
             }
         }

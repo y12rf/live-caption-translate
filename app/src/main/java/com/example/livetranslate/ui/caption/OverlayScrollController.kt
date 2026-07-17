@@ -10,9 +10,14 @@ import com.example.livetranslate.domain.model.TranscriptSegment
  * When [finishBeforeNext] is true, the next caption is shown only after the
  * current marquee reports finished (no mid-scroll jump to the next utterance).
  * Streaming partials are never enqueued.
+ *
+ * When a new sentence is recognized while the current line is still scrolling,
+ * [onBacklog] fires with the pending queue depth so the UI can **speed up**
+ * the active marquee and catch up.
  */
 class OverlayScrollController(
-    private val onShow: (OverlayCaption) -> Unit
+    private val onShow: (OverlayCaption) -> Unit,
+    private val onBacklog: (queueDepth: Int) -> Unit = {}
 ) {
     data class OverlayCaption(val en: String, val zh: String)
 
@@ -23,6 +28,9 @@ class OverlayScrollController(
     private var currentId: Long? = null
     private var scrolling = false
     var finishBeforeNext: Boolean = true
+
+    /** Number of committed captions waiting behind the one currently shown. */
+    val pendingCount: Int get() = queue.size
 
     fun reset() {
         queue.clear()
@@ -37,6 +45,7 @@ class OverlayScrollController(
     fun onState(state: LiveSessionUiState, settings: UserSettings) {
         val mode = settings.overlayTextModeEnum()
         val asrOnly = settings.asrOnlyMode
+        var newlyEnqueued = 0
         for (seg in state.segments) {
             if (seg.source.isBlank() && seg.translation.isBlank()) continue
             if (seg.localId !in seenIds) {
@@ -47,6 +56,7 @@ class OverlayScrollController(
                     seenIds.remove(first)
                 }
                 queue.addLast(Queued(seg.localId, mapEn(seg, mode), mapZh(seg, mode, asrOnly)))
+                newlyEnqueued++
             } else {
                 // Update translation when LLM finishes for a queued or current item
                 val en = mapEn(seg, mode)
@@ -61,6 +71,10 @@ class OverlayScrollController(
             }
         }
         tryShowNext()
+        // Next sentence recognized while current is still scrolling → catch up
+        if (finishBeforeNext && scrolling && newlyEnqueued > 0 && queue.isNotEmpty()) {
+            onBacklog(queue.size)
+        }
     }
 
     /** Called when both caption lines finished their marquee/dwell. */
@@ -75,6 +89,10 @@ class OverlayScrollController(
         currentId = next.id
         scrolling = true
         onShow(OverlayCaption(next.en, next.zh))
+        // Already have more queued: start this line at catch-up speed too
+        if (finishBeforeNext && queue.isNotEmpty()) {
+            onBacklog(queue.size)
+        }
     }
 
     private fun mapEn(seg: TranscriptSegment, mode: OverlayTextMode): String =
@@ -89,4 +107,26 @@ class OverlayScrollController(
             mode == OverlayTextMode.SourceOnly -> ""
             else -> seg.translation.trim().takeLast(220)
         }
+
+    companion object {
+        /** Max temporary marquee speed while catching up (px/s). */
+        const val CATCH_UP_MAX_SPEED = 480f
+
+        /**
+         * Speed multiplier for [queueDepth] pending captions behind the current one.
+         * depth 0 → 1×, 1 → 2×, 2 → 3×, 3+ → 4×.
+         */
+        fun catchUpMultiplier(queueDepth: Int): Float {
+            if (queueDepth <= 0) return 1f
+            return (1 + queueDepth).coerceAtMost(4).toFloat()
+        }
+
+        /**
+         * Effective marquee speed given base settings speed and pending queue depth.
+         */
+        fun catchUpSpeed(basePxS: Float, queueDepth: Int): Float {
+            if (queueDepth <= 0) return basePxS
+            return (basePxS * catchUpMultiplier(queueDepth)).coerceAtMost(CATCH_UP_MAX_SPEED)
+        }
+    }
 }

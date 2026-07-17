@@ -4,6 +4,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -11,19 +12,24 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.CheckBox
+import androidx.compose.material.icons.filled.CheckBoxOutlineBlank
 import androidx.compose.material.icons.filled.Clear
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Search
-import androidx.compose.material.icons.filled.Share
+import androidx.compose.material.icons.filled.Translate
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -45,6 +51,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -53,6 +60,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
@@ -65,6 +73,7 @@ import com.example.livetranslate.data.audio.SessionAudioRecorder
 import com.example.livetranslate.data.history.ExportTextMode
 import com.example.livetranslate.data.history.HistoryExport
 import com.example.livetranslate.data.history.SegmentEntity
+import com.example.livetranslate.data.history.TimelineItem
 import com.example.livetranslate.domain.ReprocessPhase
 import com.example.livetranslate.util.RecordingShareHelper
 import java.text.SimpleDateFormat
@@ -262,14 +271,21 @@ fun HistoryDetailScreen(
     val detail by viewModel.detail.collectAsStateWithLifecycle()
     val detailQuery by viewModel.detailQuery.collectAsStateWithLifecycle()
     val filtered by viewModel.filteredSegments.collectAsStateWithLifecycle()
+    val timeline by viewModel.timelineItems.collectAsStateWithLifecycle()
     val playback by viewModel.playback.collectAsStateWithLifecycle()
     val reprocess by viewModel.reprocessState.collectAsStateWithLifecycle()
     val deletedId by viewModel.deletedSessionId.collectAsStateWithLifecycle()
+    val selectionMode by viewModel.selectionMode.collectAsStateWithLifecycle()
+    val selectedIds by viewModel.selectedIds.collectAsStateWithLifecycle()
+    val translatingIds by viewModel.translatingIds.collectAsStateWithLifecycle()
+    val segmentActionError by viewModel.segmentActionError.collectAsStateWithLifecycle()
+    val segmentActionMessage by viewModel.segmentActionMessage.collectAsStateWithLifecycle()
     val context = LocalContext.current
     val clipboard = LocalClipboardManager.current
     val wallFmt = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault())
     var menuOpen by remember { mutableStateOf(false) }
     var deleteConfirmOpen by remember { mutableStateOf(false) }
+    var deleteSegmentsConfirm by remember { mutableStateOf<List<Long>?>(null) }
     var editingSegment by remember { mutableStateOf<SegmentEntity?>(null) }
     var editingTitle by remember { mutableStateOf(false) }
     var detailSearchOpen by remember { mutableStateOf(false) }
@@ -356,6 +372,62 @@ fun HistoryDetailScreen(
         )
     }
 
+    deleteSegmentsConfirm?.let { ids ->
+        AlertDialog(
+            onDismissRequest = { deleteSegmentsConfirm = null },
+            title = { Text(stringResource(R.string.history_segment_delete_confirm_title)) },
+            text = {
+                Text(stringResource(R.string.history_segment_delete_confirm_body, ids.size))
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        deleteSegmentsConfirm = null
+                        viewModel.deleteSegments(ids)
+                    }
+                ) {
+                    Text(stringResource(R.string.history_segment_delete))
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { deleteSegmentsConfirm = null }) {
+                    Text(stringResource(R.string.cancel))
+                }
+            }
+        )
+    }
+
+    LaunchedEffect(segmentActionError) {
+        val err = segmentActionError ?: return@LaunchedEffect
+        val msg = when (err) {
+            "llm_key" -> context.getString(R.string.history_segment_llm_key_missing)
+            "asr_only" -> context.getString(R.string.history_segment_asr_only)
+            "retranslate_failed" -> context.getString(R.string.history_segment_retranslate_failed)
+            else -> err
+        }
+        android.widget.Toast.makeText(context, msg, android.widget.Toast.LENGTH_LONG).show()
+        viewModel.clearSegmentActionError()
+    }
+
+    LaunchedEffect(segmentActionMessage) {
+        val raw = segmentActionMessage ?: return@LaunchedEffect
+        val msg = when {
+            raw.startsWith("deleted:") -> {
+                val n = raw.removePrefix("deleted:").toIntOrNull() ?: 0
+                context.getString(R.string.history_segment_deleted, n)
+            }
+            raw.startsWith("retranslated:") -> {
+                val parts = raw.removePrefix("retranslated:").split(":")
+                val ok = parts.getOrNull(0)?.toIntOrNull() ?: 0
+                val fail = parts.getOrNull(1)?.toIntOrNull() ?: 0
+                context.getString(R.string.history_segment_retranslated, ok, fail)
+            }
+            else -> raw
+        }
+        android.widget.Toast.makeText(context, msg, android.widget.Toast.LENGTH_SHORT).show()
+        viewModel.clearSegmentActionMessage()
+    }
+
     fun toastEmpty() {
         android.widget.Toast.makeText(
             context,
@@ -407,33 +479,41 @@ fun HistoryDetailScreen(
         topBar = {
             TopAppBar(
                 title = {
-                    if (detailSearchOpen) {
-                        TopBarSearchField(
-                            value = detailQuery,
-                            onValueChange = viewModel::setDetailQuery,
-                            placeholder = stringResource(R.string.detail_search_hint),
-                            focusRequester = detailSearchFocus
-                        )
-                    } else {
-                        val t = detail?.session?.previewZh?.takeIf { it.isNotBlank() }
-                        Text(
-                            t ?: "Session",
-                            maxLines = 1,
-                            modifier = Modifier.combinedClickable(
-                                onClick = {},
-                                onLongClick = { editingTitle = true }
+                    when {
+                        selectionMode -> {
+                            Text(stringResource(R.string.history_selection_count, selectedIds.size))
+                        }
+                        detailSearchOpen -> {
+                            TopBarSearchField(
+                                value = detailQuery,
+                                onValueChange = viewModel::setDetailQuery,
+                                placeholder = stringResource(R.string.detail_search_hint),
+                                focusRequester = detailSearchFocus
                             )
-                        )
+                        }
+                        else -> {
+                            val t = detail?.session?.previewZh?.takeIf { it.isNotBlank() }
+                            Text(
+                                t ?: "Session",
+                                maxLines = 1,
+                                modifier = Modifier.combinedClickable(
+                                    onClick = {},
+                                    onLongClick = { editingTitle = true }
+                                )
+                            )
+                        }
                     }
                 },
                 navigationIcon = {
                     IconButton(
                         onClick = {
-                            if (detailSearchOpen) {
-                                detailSearchOpen = false
-                                viewModel.setDetailQuery("")
-                            } else {
-                                onBack()
+                            when {
+                                selectionMode -> viewModel.clearSelection()
+                                detailSearchOpen -> {
+                                    detailSearchOpen = false
+                                    viewModel.setDetailQuery("")
+                                }
+                                else -> onBack()
                             }
                         }
                     ) {
@@ -441,7 +521,38 @@ fun HistoryDetailScreen(
                     }
                 },
                 actions = {
-                    if (detailSearchOpen) {
+                    if (selectionMode) {
+                        TextButton(onClick = viewModel::selectAllVisible) {
+                            Text(stringResource(R.string.history_select_all))
+                        }
+                        IconButton(
+                            onClick = {
+                                if (selectedIds.isNotEmpty()) {
+                                    deleteSegmentsConfirm = selectedIds.toList()
+                                }
+                            },
+                            enabled = selectedIds.isNotEmpty() && translatingIds.isEmpty()
+                        ) {
+                            Icon(
+                                Icons.Default.Delete,
+                                contentDescription = stringResource(R.string.history_segment_delete)
+                            )
+                        }
+                        IconButton(
+                            onClick = viewModel::retranslateSelected,
+                            enabled = selectedIds.isNotEmpty() && translatingIds.isEmpty()
+                        ) {
+                            Icon(
+                                Icons.Default.Translate,
+                                contentDescription = stringResource(
+                                    R.string.history_segment_retranslate
+                                )
+                            )
+                        }
+                        TextButton(onClick = viewModel::clearSelection) {
+                            Text(stringResource(R.string.history_selection_cancel))
+                        }
+                    } else if (detailSearchOpen) {
                         if (detailQuery.isNotEmpty()) {
                             IconButton(onClick = { viewModel.setDetailQuery("") }) {
                                 Icon(Icons.Default.Clear, contentDescription = "Clear")
@@ -455,7 +566,7 @@ fun HistoryDetailScreen(
                             )
                         }
                     }
-                    if (canPlay) {
+                    if (!selectionMode && canPlay) {
                         IconButton(
                             onClick = {
                                 // First tap expands panel; also toggles play/pause.
@@ -472,6 +583,7 @@ fun HistoryDetailScreen(
                             )
                         }
                     }
+                    if (!selectionMode) {
                     IconButton(onClick = { menuOpen = true }) {
                         Icon(Icons.Default.MoreVert, contentDescription = "More")
                     }
@@ -634,6 +746,7 @@ fun HistoryDetailScreen(
                             }
                         )
                     }
+                    }
                 }
             )
         }
@@ -731,71 +844,239 @@ fun HistoryDetailScreen(
                             )
                         }
                     } else {
-                        items(filtered, key = { it.id }) { seg ->
-                            val active = playback.activeSegmentId == seg.id
-                            val canSeek = playback.hasTimeline && playback.prepared
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .combinedClickable(
-                                        onClick = {
-                                            val text = formatSegmentClipboard(seg)
-                                            if (text.isNotBlank()) {
-                                                clipboard.setText(AnnotatedString(text))
-                                                android.widget.Toast.makeText(
-                                                    context,
-                                                    context.getString(R.string.history_segment_copied),
-                                                    android.widget.Toast.LENGTH_SHORT
-                                                ).show()
-                                            }
-                                        },
-                                        onLongClick = { editingSegment = seg }
-                                    )
-                                    .background(
-                                        if (active) {
-                                            MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.35f)
-                                        } else {
-                                            MaterialTheme.colorScheme.surface
-                                        }
-                                    )
-                                    .padding(vertical = 8.dp),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Column(
-                                    modifier = Modifier
-                                        .weight(1f)
-                                        .padding(vertical = 4.dp)
-                                ) {
-                                    Text(
-                                        "[${HistoryExport.formatOffset(seg.offsetMs)}]  " +
-                                            wallFmt.format(Date(seg.createdAt)),
-                                        style = MaterialTheme.typography.labelSmall,
-                                        fontWeight = if (active) FontWeight.Bold else FontWeight.Normal
-                                    )
-                                    Text("${stringResource(R.string.label_source)}: ${seg.source}")
-                                    Text(
-                                        "${stringResource(R.string.label_translation)}: ${seg.translation}"
-                                    )
-                                    if (seg.incomplete) {
-                                        Text(stringResource(R.string.segment_incomplete))
-                                    }
-                                }
-                                if (canSeek) {
-                                    IconButton(onClick = { viewModel.seekToSegment(seg) }) {
-                                        Icon(
-                                            Icons.Default.PlayArrow,
-                                            contentDescription = stringResource(
-                                                R.string.history_seek_segment
-                                            )
-                                        )
-                                    }
+                        items(
+                            timeline,
+                            key = { item ->
+                                when (item) {
+                                    is TimelineItem.Segment -> "seg-${item.segment.id}"
+                                    is TimelineItem.Silence -> item.key
                                 }
                             }
-                            HorizontalDivider()
+                        ) { item ->
+                            when (item) {
+                                is TimelineItem.Silence -> {
+                                    // ≥1s silence: blank row (no ellipsis)
+                                    SilenceBlankRow(
+                                        startMs = item.startMs,
+                                        durationMs = item.durationMs
+                                    )
+                                    HorizontalDivider()
+                                }
+                                is TimelineItem.Segment -> {
+                                    val seg = item.segment
+                                    TimelineSegmentRow(
+                                        seg = seg,
+                                        active = playback.activeSegmentId == seg.id,
+                                        selected = seg.id in selectedIds,
+                                        selectionMode = selectionMode,
+                                        translating = seg.id in translatingIds,
+                                        canSeek = playback.hasTimeline && playback.prepared,
+                                        wallFmt = wallFmt,
+                                        onToggleSelect = { viewModel.toggleSegmentSelected(seg.id) },
+                                        onSwipeSelect = { viewModel.swipeSelect(seg.id) },
+                                        onSwipeDeselect = { viewModel.swipeDeselect(seg.id) },
+                                        onClick = {
+                                            if (selectionMode) {
+                                                viewModel.toggleSegmentSelected(seg.id)
+                                            } else {
+                                                val text = formatSegmentClipboard(seg)
+                                                if (text.isNotBlank()) {
+                                                    clipboard.setText(AnnotatedString(text))
+                                                    android.widget.Toast.makeText(
+                                                        context,
+                                                        context.getString(
+                                                            R.string.history_segment_copied
+                                                        ),
+                                                        android.widget.Toast.LENGTH_SHORT
+                                                    ).show()
+                                                }
+                                            }
+                                        },
+                                        onLongClick = {
+                                            if (!selectionMode) {
+                                                editingSegment = seg
+                                            } else {
+                                                viewModel.toggleSegmentSelected(seg.id)
+                                            }
+                                        },
+                                        onSeek = { viewModel.seekToSegment(seg) },
+                                        onDelete = {
+                                            deleteSegmentsConfirm = listOf(seg.id)
+                                        },
+                                        onRetranslate = {
+                                            viewModel.retranslateSegments(listOf(seg.id))
+                                        }
+                                    )
+                                    HorizontalDivider()
+                                }
+                            }
                         }
                     }
                 }
 
+            }
+        }
+    }
+}
+
+/**
+ * Blank timeline row for silence gaps ≥1s.
+ * No ellipsis / placeholder text — pure empty space so silence reads as blank.
+ */
+@Composable
+private fun SilenceBlankRow(
+    @Suppress("UNUSED_PARAMETER") startMs: Long,
+    durationMs: Long
+) {
+    // Height scales slightly with long silence but stays compact.
+    val h = when {
+        durationMs >= 5_000L -> 36.dp
+        durationMs >= 2_000L -> 28.dp
+        else -> 20.dp
+    }
+    Spacer(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(h)
+            .padding(horizontal = 4.dp)
+    )
+}
+
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun TimelineSegmentRow(
+    seg: SegmentEntity,
+    active: Boolean,
+    selected: Boolean,
+    selectionMode: Boolean,
+    translating: Boolean,
+    canSeek: Boolean,
+    wallFmt: SimpleDateFormat,
+    onToggleSelect: () -> Unit,
+    onSwipeSelect: () -> Unit,
+    onSwipeDeselect: () -> Unit,
+    onClick: () -> Unit,
+    onLongClick: () -> Unit,
+    onSeek: () -> Unit,
+    onDelete: () -> Unit,
+    onRetranslate: () -> Unit
+) {
+    var dragAccum by remember(seg.id) { mutableFloatStateOf(0f) }
+    var menuOpen by remember(seg.id) { mutableStateOf(false) }
+    val swipeThreshold = 72f
+
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .pointerInput(seg.id, selectionMode) {
+                detectHorizontalDragGestures(
+                    onDragStart = { dragAccum = 0f },
+                    onDragEnd = {
+                        when {
+                            dragAccum >= swipeThreshold -> onSwipeSelect()
+                            dragAccum <= -swipeThreshold -> {
+                                if (selectionMode) onSwipeDeselect()
+                                else menuOpen = true
+                            }
+                        }
+                        dragAccum = 0f
+                    },
+                    onDragCancel = { dragAccum = 0f },
+                    onHorizontalDrag = { _, dx -> dragAccum += dx }
+                )
+            }
+            .combinedClickable(
+                onClick = onClick,
+                onLongClick = onLongClick
+            )
+            .background(
+                when {
+                    selected -> MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.55f)
+                    active -> MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.35f)
+                    else -> MaterialTheme.colorScheme.surface
+                }
+            )
+            .padding(vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        if (selectionMode) {
+            IconButton(onClick = onToggleSelect) {
+                Icon(
+                    if (selected) Icons.Default.CheckBox else Icons.Default.CheckBoxOutlineBlank,
+                    contentDescription = null
+                )
+            }
+        }
+        Column(
+            modifier = Modifier
+                .weight(1f)
+                .padding(vertical = 4.dp)
+        ) {
+            Text(
+                "[${HistoryExport.formatOffset(seg.offsetMs)}]  " +
+                    wallFmt.format(Date(seg.createdAt)),
+                style = MaterialTheme.typography.labelSmall,
+                fontWeight = if (active) FontWeight.Bold else FontWeight.Normal
+            )
+            // Empty source/translation: blank (never "…")
+            val src = seg.source
+            val zh = seg.translation
+            Text("${stringResource(R.string.label_source)}: $src")
+            Text("${stringResource(R.string.label_translation)}: $zh")
+            if (seg.incomplete) {
+                Text(stringResource(R.string.segment_incomplete))
+            }
+            if (translating) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    CircularProgressIndicator(
+                        modifier = Modifier
+                            .size(14.dp)
+                            .padding(end = 4.dp),
+                        strokeWidth = 2.dp
+                    )
+                    Text(
+                        stringResource(R.string.history_segment_retranslating),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                }
+            }
+        }
+        if (!selectionMode) {
+            IconButton(onClick = { menuOpen = true }) {
+                Icon(
+                    Icons.Default.MoreVert,
+                    contentDescription = stringResource(R.string.history_segment_menu)
+                )
+            }
+            DropdownMenu(
+                expanded = menuOpen,
+                onDismissRequest = { menuOpen = false }
+            ) {
+                DropdownMenuItem(
+                    text = { Text(stringResource(R.string.history_segment_retranslate)) },
+                    onClick = {
+                        menuOpen = false
+                        onRetranslate()
+                    },
+                    enabled = !translating && seg.source.isNotBlank()
+                )
+                DropdownMenuItem(
+                    text = { Text(stringResource(R.string.history_segment_delete)) },
+                    onClick = {
+                        menuOpen = false
+                        onDelete()
+                    },
+                    enabled = !translating
+                )
+            }
+            if (canSeek) {
+                IconButton(onClick = onSeek) {
+                    Icon(
+                        Icons.Default.PlayArrow,
+                        contentDescription = stringResource(R.string.history_seek_segment)
+                    )
+                }
             }
         }
     }

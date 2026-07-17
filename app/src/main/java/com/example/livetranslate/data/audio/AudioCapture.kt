@@ -21,6 +21,7 @@ import com.example.livetranslate.data.settings.SileroVadMode
 import com.example.livetranslate.data.settings.UserSettings
 import com.example.livetranslate.domain.model.AudioSourceType
 import com.example.livetranslate.domain.model.UtteranceAudio
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -180,6 +181,9 @@ class AudioCapture(
                 } else {
                     loopMicrophone()
                 }
+            } catch (e: CancellationException) {
+                // pause()/stop() cancel this job intentionally — not a capture failure.
+                throw e
             } catch (e: Exception) {
                 Log.e(TAG, "capture loop crashed", e)
                 _captureError.value = e.message ?: e.javaClass.simpleName
@@ -204,6 +208,8 @@ class AudioCapture(
     fun stop(flush: Boolean = true) {
         running = false
         isRecording = false
+        // Clear so an intentional stop never surfaces as "capture failed" via observers.
+        clearError()
         val vad = activeVad
         if (flush && vad != null) {
             try {

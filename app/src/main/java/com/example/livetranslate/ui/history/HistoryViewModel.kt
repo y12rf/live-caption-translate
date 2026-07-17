@@ -11,9 +11,13 @@ import com.example.livetranslate.data.history.HistoryRepository
 import com.example.livetranslate.data.history.SegmentEntity
 import com.example.livetranslate.data.history.SessionDetail
 import com.example.livetranslate.data.history.SessionSummary
+import com.example.livetranslate.data.history.TimelineItem
+import com.example.livetranslate.data.llm.LlmClient
+import com.example.livetranslate.data.settings.SettingsRepository
 import com.example.livetranslate.di.AppContainer
 import com.example.livetranslate.domain.OfflineReprocessPipeline
 import com.example.livetranslate.domain.ReprocessUiState
+import com.example.livetranslate.domain.model.LlmStreamEvent
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.Job
@@ -24,6 +28,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.debounce
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
@@ -33,7 +38,9 @@ import kotlinx.coroutines.launch
 @OptIn(FlowPreview::class, ExperimentalCoroutinesApi::class)
 class HistoryViewModel(
     private val repo: HistoryRepository,
-    private val reprocess: OfflineReprocessPipeline
+    private val reprocess: OfflineReprocessPipeline,
+    private val llm: LlmClient,
+    private val settingsRepo: SettingsRepository
 ) : ViewModel() {
 
     private val _listQuery = MutableStateFlow("")
@@ -57,7 +64,38 @@ class HistoryViewModel(
             else repo.filterSegments(d, q)
         }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
+    /**
+     * Timeline rows for the open session: dialogue segments plus blank silence gaps ≥1s.
+     * Honors detail search (silence rows only when search is empty).
+     */
+    val timelineItems: StateFlow<List<TimelineItem>> =
+        combine(filteredSegments, _detailQuery) { segs, q ->
+            if (q.isNotBlank()) {
+                segs.map { TimelineItem.Segment(it) }
+            } else {
+                HistoryExport.buildTimelineItems(segs)
+            }
+        }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
     val reprocessState: StateFlow<ReprocessUiState> = reprocess.state
+
+    // --- Multi-select (history timeline) ---
+    private val _selectionMode = MutableStateFlow(false)
+    val selectionMode: StateFlow<Boolean> = _selectionMode.asStateFlow()
+
+    private val _selectedIds = MutableStateFlow<Set<Long>>(emptySet())
+    val selectedIds: StateFlow<Set<Long>> = _selectedIds.asStateFlow()
+
+    private val _translatingIds = MutableStateFlow<Set<Long>>(emptySet())
+    val translatingIds: StateFlow<Set<Long>> = _translatingIds.asStateFlow()
+
+    private val _segmentActionError = MutableStateFlow<String?>(null)
+    val segmentActionError: StateFlow<String?> = _segmentActionError.asStateFlow()
+
+    private val _segmentActionMessage = MutableStateFlow<String?>(null)
+    val segmentActionMessage: StateFlow<String?> = _segmentActionMessage.asStateFlow()
+
+    private var retranslateJob: Job? = null
 
     private val player = SessionAudioPlayer()
 
@@ -88,6 +126,7 @@ class HistoryViewModel(
         viewModelScope.launch {
             if (loadedSessionId != id) {
                 releasePlayer()
+                clearSelection()
             }
             loadedSessionId = id
             val d = repo.getSessionDetail(id)
@@ -95,6 +134,171 @@ class HistoryViewModel(
             _detailQuery.value = ""
             preparePlayerIfNeeded(d)
         }
+    }
+
+    fun clearSegmentActionError() {
+        _segmentActionError.value = null
+    }
+
+    fun clearSegmentActionMessage() {
+        _segmentActionMessage.value = null
+    }
+
+    fun enterSelectionMode(seedId: Long? = null) {
+        _selectionMode.value = true
+        if (seedId != null && seedId > 0L) {
+            _selectedIds.update { it + seedId }
+        }
+    }
+
+    fun clearSelection() {
+        _selectionMode.value = false
+        _selectedIds.value = emptySet()
+    }
+
+    fun toggleSegmentSelected(id: Long) {
+        if (!_selectionMode.value) {
+            _selectionMode.value = true
+        }
+        _selectedIds.update { cur ->
+            if (id in cur) cur - id else cur + id
+        }
+        if (_selectedIds.value.isEmpty()) {
+            _selectionMode.value = false
+        }
+    }
+
+    /** Swipe right: select this line (enter multi-select if needed). */
+    fun swipeSelect(id: Long) {
+        enterSelectionMode(seedId = id)
+        _selectedIds.update { it + id }
+    }
+
+    /** Swipe left: deselect this line; exit multi-select when none left. */
+    fun swipeDeselect(id: Long) {
+        if (!_selectionMode.value) return
+        _selectedIds.update { it - id }
+        if (_selectedIds.value.isEmpty()) {
+            _selectionMode.value = false
+        }
+    }
+
+    fun selectAllVisible() {
+        val ids = filteredSegments.value.map { it.id }.toSet()
+        if (ids.isEmpty()) return
+        _selectionMode.value = true
+        _selectedIds.value = ids
+    }
+
+    private suspend fun reloadDetail() {
+        val cur = _detail.value ?: return
+        val d = repo.getSessionDetail(cur.session.id) ?: return
+        _detail.value = d
+        val pos = _playback.value.positionMs
+        if (_playback.value.hasTimeline) {
+            _playback.update {
+                it.copy(activeSegmentId = activeSegmentIdAt(pos.toLong()))
+            }
+        }
+    }
+
+    /** Delete one or many timeline dialogue rows. */
+    fun deleteSegments(ids: Collection<Long>) {
+        val list = ids.filter { it > 0L }.distinct()
+        if (list.isEmpty()) return
+        viewModelScope.launch {
+            val n = repo.deleteSegments(list)
+            if (n > 0) {
+                _selectedIds.update { it - list.toSet() }
+                if (_selectedIds.value.isEmpty()) {
+                    _selectionMode.value = false
+                }
+                reloadDetail()
+                _segmentActionMessage.value = "deleted:$n"
+            }
+        }
+    }
+
+    fun deleteSelected() {
+        deleteSegments(_selectedIds.value)
+    }
+
+    /**
+     * Re-translate source text of the given segments via current LLM settings.
+     * Updates translation in-place (does not re-run ASR).
+     */
+    fun retranslateSegments(ids: Collection<Long>) {
+        val list = ids.filter { it > 0L }.distinct()
+        if (list.isEmpty()) return
+        if (retranslateJob?.isActive == true) return
+        retranslateJob = viewModelScope.launch {
+            val settings = settingsRepo.settings.first()
+            if (settings.asrOnlyMode) {
+                _segmentActionError.value = "asr_only"
+                return@launch
+            }
+            if (settings.llmApiKey.isBlank()) {
+                _segmentActionError.value = "llm_key"
+                return@launch
+            }
+            val config = settings.toLlmConfig()
+            var ok = 0
+            var fail = 0
+            for (id in list) {
+                val seg = _detail.value?.segments?.find { it.id == id }
+                if (seg == null) {
+                    fail++
+                    continue
+                }
+                val source = seg.source.trim()
+                if (source.isEmpty()) {
+                    fail++
+                    continue
+                }
+                _translatingIds.update { it + id }
+                try {
+                    var zh = ""
+                    llm.translateStream(source, emptyList(), config).collect { ev ->
+                        when (ev) {
+                            is LlmStreamEvent.Delta -> zh += ev.text
+                            is LlmStreamEvent.Completed -> {
+                                if (ev.fullText.isNotEmpty()) zh = ev.fullText
+                            }
+                            is LlmStreamEvent.Error -> throw ev.throwable
+                        }
+                    }
+                    zh = LlmClient.stripThinkingArtifacts(zh).trim()
+                    if (zh.isEmpty()) {
+                        fail++
+                    } else if (repo.updateSegmentText(id, source, zh)) {
+                        ok++
+                        // Refresh row as we go so UI updates progressively
+                        reloadDetail()
+                    } else {
+                        fail++
+                    }
+                } catch (e: Exception) {
+                    fail++
+                    android.util.Log.w(TAG, "retranslate id=$id failed", e)
+                    _segmentActionError.value = e.message ?: "retranslate_failed"
+                } finally {
+                    _translatingIds.update { it - id }
+                }
+            }
+            if (ok > 0) {
+                _selectedIds.update { it - list.toSet() }
+                if (_selectedIds.value.isEmpty()) {
+                    _selectionMode.value = false
+                }
+                _segmentActionMessage.value = "retranslated:$ok:$fail"
+            } else if (fail > 0 && _segmentActionError.value == null) {
+                _segmentActionError.value = "retranslate_failed"
+            }
+        }
+    }
+
+    fun retranslateSelected() {
+        retranslateSegments(_selectedIds.value)
     }
 
     fun startReprocessCurrent() {
@@ -258,6 +462,10 @@ class HistoryViewModel(
 
     fun onLeaveDetail() {
         releasePlayer()
+        retranslateJob?.cancel()
+        retranslateJob = null
+        clearSelection()
+        _translatingIds.value = emptySet()
         loadedSessionId = -1L
     }
 
@@ -348,8 +556,14 @@ class HistoryViewModel(
         override fun <T : ViewModel> create(modelClass: Class<T>): T {
             return HistoryViewModel(
                 repo = container.historyRepository,
-                reprocess = container.reprocessPipeline
+                reprocess = container.reprocessPipeline,
+                llm = container.llmClient,
+                settingsRepo = container.settingsRepository
             ) as T
         }
+    }
+
+    companion object {
+        private const val TAG = "HistoryViewModel"
     }
 }

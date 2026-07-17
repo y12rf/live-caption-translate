@@ -227,6 +227,18 @@ class SessionOrchestrator(
     fun translationCacheSize(): Int = translationCache.size
 
     fun reportCaptureError(message: String) {
+        // Ignore late capture errors while stopping / already idle — otherwise a cancelled
+        // capture loop or MediaProjection teardown races finalizeIdle and flips Idle → Paused,
+        // which looks like "start failed" on the next Start/Resume (esp. internal audio).
+        if (stopOnce.get() || draining.get()) {
+            android.util.Log.i(TAG, "reportCaptureError ignored during stop: $message")
+            return
+        }
+        val phase = _state.value.phase
+        if (phase == SessionPhase.Idle) {
+            android.util.Log.i(TAG, "reportCaptureError ignored in Idle: $message")
+            return
+        }
         userPaused.set(true)
         audio.pause()
         stopTimer()
@@ -523,6 +535,16 @@ class SessionOrchestrator(
     fun pause() {
         if (_state.value.audioSource == AudioSourceType.File) {
             // Offline file feed has no mic pause; user can Stop.
+            return
+        }
+        // MediaProjection.Callback.onStop often fires *after* we intentionally release the
+        // token on session end. Do not resurrect a finished session as Paused.
+        if (stopOnce.get() || draining.get()) {
+            android.util.Log.i(TAG, "pause ignored during stop/drain")
+            return
+        }
+        if (_state.value.phase == SessionPhase.Idle) {
+            android.util.Log.i(TAG, "pause ignored in Idle")
             return
         }
         userPaused.set(true)

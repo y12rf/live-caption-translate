@@ -95,6 +95,9 @@ interface SessionDao {
     @Query("SELECT * FROM segments WHERE id = :id LIMIT 1")
     suspend fun getSegment(id: Long): SegmentEntity?
 
+    @Query("DELETE FROM segments WHERE id IN (:ids)")
+    suspend fun deleteSegmentsByIds(ids: List<Long>): Int
+
     @Query(
         """
         UPDATE segments
@@ -285,6 +288,34 @@ object HistoryExport {
         return rawEnd.coerceAtLeast(start + MIN_CUE_MS)
     }
 
+    /**
+     * Minimum silence gap (ms) shown as a blank timeline row between dialogue lines.
+     */
+    const val SILENCE_GAP_MS = 1_000L
+
+    /**
+     * Build timeline rows for history detail: each segment, plus a blank silence row
+     * when the start-offset gap to the next segment is ≥ [SILENCE_GAP_MS].
+     */
+    fun buildTimelineItems(segments: List<SegmentEntity>): List<TimelineItem> {
+        if (segments.isEmpty()) return emptyList()
+        val ordered = segments.sortedWith(compareBy({ it.offsetMs }, { it.id }))
+        val out = ArrayList<TimelineItem>(ordered.size * 2)
+        for (i in ordered.indices) {
+            out += TimelineItem.Segment(ordered[i])
+            val next = ordered.getOrNull(i + 1) ?: break
+            val gap = next.offsetMs - ordered[i].offsetMs
+            if (gap >= SILENCE_GAP_MS) {
+                out += TimelineItem.Silence(
+                    startMs = ordered[i].offsetMs,
+                    durationMs = gap,
+                    key = "silence-${ordered[i].id}-${next.id}"
+                )
+            }
+        }
+        return out
+    }
+
     /** Plain text: one segment per line (for clipboard). */
     fun formatPlainText(detail: SessionDetail, mode: ExportTextMode): String {
         if (detail.segments.isEmpty()) return ""
@@ -349,4 +380,14 @@ object HistoryExport {
 
     fun cutReasonOf(name: String?): CutReason? =
         name?.let { runCatching { CutReason.valueOf(it) }.getOrNull() }
+}
+
+/** One row in the history timeline list (dialogue or silence blank). */
+sealed class TimelineItem {
+    data class Segment(val segment: SegmentEntity) : TimelineItem()
+    data class Silence(
+        val startMs: Long,
+        val durationMs: Long,
+        val key: String
+    ) : TimelineItem()
 }

@@ -21,6 +21,9 @@ import kotlin.math.max
  * Overlay caption line: full multi-line static text, or single-line horizontal marquee
  * with **configurable speed** (px/s). Fires [onScrollFinished] after one full pass
  * (or a short dwell when text fits without scrolling).
+ *
+ * Supports mid-scroll catch-up via [applySpeedNow]: when the next sentence is already
+ * queued, the overlay can raise speed so the current line finishes sooner.
  */
 class CaptionLineView @JvmOverloads constructor(
     context: Context,
@@ -39,16 +42,25 @@ class CaptionLineView @JvmOverloads constructor(
     private var textWidthPx: Float = 0f
     private var scrollOffset: Float = 0f
     private var animator: ValueAnimator? = null
-    /** Pixels per second when marquee is active. */
+    /** Full travel distance of the active marquee (0 when dwelling / idle). */
+    private var marqueeDistance: Float = 0f
+    /** True while a no-scroll dwell timer is scheduled. */
+    private var dwelling: Boolean = false
+
+    /**
+     * Active marquee speed in px/s. Settings use 20–160; catch-up may go higher
+     * (up to [CATCH_UP_MAX_SPEED]).
+     */
     var speedPxPerSec: Float = DEFAULT_SPEED_PX_S
         set(value) {
-            field = value.coerceIn(MIN_SPEED, MAX_SPEED)
+            field = value.coerceIn(MIN_SPEED, CATCH_UP_MAX_SPEED)
         }
 
     var onScrollFinished: (() -> Unit)? = null
 
     private var finishPosted = false
     private val dwellRunnable = Runnable {
+        dwelling = false
         if (!finishPosted) {
             finishPosted = true
             onScrollFinished?.invoke()
@@ -94,8 +106,10 @@ class CaptionLineView @JvmOverloads constructor(
         }
         text = t
         finishPosted = false
+        dwelling = false
         removeCallbacks(dwellRunnable)
         stopAnim()
+        marqueeDistance = 0f
         rebuildLayout()
         if (mode == Mode.Marquee) {
             startMarquee()
@@ -107,9 +121,76 @@ class CaptionLineView @JvmOverloads constructor(
     fun cancelScroll() {
         stopAnim()
         removeCallbacks(dwellRunnable)
+        dwelling = false
         scrollOffset = 0f
+        marqueeDistance = 0f
         finishPosted = true
         invalidate()
+    }
+
+    /**
+     * Raise (or lower) marquee speed **while the current line is still running**,
+     * without restarting from offset 0. Used to catch up when the next sentence
+     * has already been recognized.
+     *
+     * - Scrolling: rebuild animator from [scrollOffset] with the new speed.
+     * - Dwelling (text fits): shorten remaining dwell; high speed finishes immediately.
+     * - Already finished: no-op.
+     */
+    fun applySpeedNow(newSpeedPxPerSec: Float) {
+        if (mode != Mode.Marquee || finishPosted || text.isEmpty()) return
+        val target = newSpeedPxPerSec.coerceIn(MIN_SPEED, CATCH_UP_MAX_SPEED)
+        // Ignore tiny changes to avoid thrashing animators
+        if (kotlin.math.abs(target - speedPxPerSec) < 0.5f && animator != null) return
+        speedPxPerSec = target
+
+        if (dwelling) {
+            removeCallbacks(dwellRunnable)
+            // Aggressive catch-up: skip remaining dwell so queue can advance
+            if (target >= CATCH_UP_FINISH_DWELL_SPEED) {
+                dwelling = false
+                if (!finishPosted) {
+                    finishPosted = true
+                    onScrollFinished?.invoke()
+                }
+            } else {
+                postDelayed(dwellRunnable, CATCH_UP_DWELL_MS)
+            }
+            return
+        }
+
+        val anim = animator ?: return
+        val current = scrollOffset
+        val end = marqueeDistance
+        val remaining = (end - current).coerceAtLeast(0f)
+        if (remaining <= 1f) return
+
+        // Cancel without firing finish; continue from current offset
+        anim.removeAllListeners()
+        anim.cancel()
+        animator = null
+
+        val durationMs = max(
+            CATCH_UP_MIN_DURATION_MS,
+            ceil(remaining / target * 1000.0).toLong()
+        )
+        animator = ValueAnimator.ofFloat(current, end).apply {
+            duration = durationMs
+            interpolator = LinearInterpolator()
+            addUpdateListener {
+                scrollOffset = it.animatedValue as Float
+                invalidate()
+            }
+            addListener(object : AnimatorListenerAdapter() {
+                override fun onAnimationEnd(animation: Animator) {
+                    if (!finishPosted) {
+                        finishPosted = true
+                        onScrollFinished?.invoke()
+                    }
+                }
+            })
+            start()
+        }
     }
 
     override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
@@ -169,6 +250,7 @@ class CaptionLineView @JvmOverloads constructor(
     override fun onDetachedFromWindow() {
         stopAnim()
         removeCallbacks(dwellRunnable)
+        dwelling = false
         super.onDetachedFromWindow()
     }
 
@@ -195,7 +277,10 @@ class CaptionLineView @JvmOverloads constructor(
 
     private fun startMarquee() {
         stopAnim()
+        removeCallbacks(dwellRunnable)
+        dwelling = false
         scrollOffset = 0f
+        marqueeDistance = 0f
         finishPosted = false
         val contentW = (width - paddingLeft - paddingRight).coerceAtLeast(0)
         if (contentW <= 0 || text.isEmpty()) {
@@ -209,6 +294,7 @@ class CaptionLineView @JvmOverloads constructor(
         if (textWidthPx <= contentW) {
             // Fits: dwell then finished (no scroll)
             invalidate()
+            dwelling = true
             postDelayed(dwellRunnable, DWELL_MS)
             return
         }
@@ -216,7 +302,8 @@ class CaptionLineView @JvmOverloads constructor(
         // plus a small gap so the end is readable.
         val gap = contentW * 0.35f
         val distance = textWidthPx + gap
-        val speed = speedPxPerSec.coerceIn(MIN_SPEED, MAX_SPEED)
+        marqueeDistance = distance
+        val speed = speedPxPerSec.coerceIn(MIN_SPEED, CATCH_UP_MAX_SPEED)
         val durationMs = max(MIN_DURATION_MS, ceil(distance / speed * 1000.0).toLong())
         animator = ValueAnimator.ofFloat(0f, distance).apply {
             duration = durationMs
@@ -253,8 +340,20 @@ class CaptionLineView @JvmOverloads constructor(
     companion object {
         const val DEFAULT_SPEED_PX_S = 60f
         private const val MIN_SPEED = 20f
-        private const val MAX_SPEED = 160f
+        /** User-facing settings cap (also used when restoring base speed). */
+        const val SETTINGS_MAX_SPEED = 160f
+        /** Temporary cap while catching up a backlog of queued sentences. */
+        const val CATCH_UP_MAX_SPEED = 480f
         private const val MIN_DURATION_MS = 800L
+        /** Allow shorter remaining duration when speeding up mid-scroll. */
+        private const val CATCH_UP_MIN_DURATION_MS = 200L
         private const val DWELL_MS = 1600L
+        /** Shortened dwell while catch-up is active. */
+        private const val CATCH_UP_DWELL_MS = 350L
+        /**
+         * At or above this catch-up speed, a dwelling line finishes immediately
+         * (deep backlog).
+         */
+        private const val CATCH_UP_FINISH_DWELL_SPEED = 200f
     }
 }

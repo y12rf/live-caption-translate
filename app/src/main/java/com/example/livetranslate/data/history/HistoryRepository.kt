@@ -97,6 +97,16 @@ class HistoryRepository(context: Context) {
         return dao.updateSegmentText(segmentId, src, zh, incomplete) > 0
     }
 
+    /**
+     * Delete one or more transcript segments by id.
+     * @return number of rows deleted
+     */
+    suspend fun deleteSegments(ids: Collection<Long>): Int {
+        val list = ids.filter { it > 0L }.distinct()
+        if (list.isEmpty()) return 0
+        return dao.deleteSegmentsByIds(list)
+    }
+
     /** Rename session title (stored in [SessionEntity.previewZh]). */
     suspend fun updateSessionTitle(sessionId: Long, title: String): Boolean {
         val t = title.trim().take(200)
