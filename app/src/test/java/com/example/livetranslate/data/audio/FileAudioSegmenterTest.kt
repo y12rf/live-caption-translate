@@ -18,6 +18,11 @@ class FileAudioSegmenterTest {
     @get:Rule
     val tmp = TemporaryFolder()
 
+    private fun energySegmenter(threshold: Double = 200.0) = FileAudioSegmenter(
+        frameSamples = 320, // energy classifier is frame-size agnostic
+        classifierFactory = { EnergySpeechClassifier(threshold) }
+    )
+
     @Test
     fun segment_speechThenSilence_emitsUtterance() = runBlocking {
         // 2s loud + 1s silence @ 16k mono → should cut on silence with low min length
@@ -27,10 +32,9 @@ class FileAudioSegmenterTest {
         val settings = UserSettings(
             silenceMs = 300,
             maxUtteranceMs = 15_000,
-            minUtteranceMs = 400,
-            energyThreshold = 200.0
+            minUtteranceMs = 400
         )
-        val segs = FileAudioSegmenter().segment(wav, settings).toList()
+        val segs = energySegmenter().segment(wav, settings).toList()
         assertTrue("expected >=1 utterance, got ${segs.size}", segs.isNotEmpty())
         assertTrue(segs.first().pcm.isNotEmpty())
         assertEquals(sr, segs.first().sampleRate)
@@ -50,10 +54,9 @@ class FileAudioSegmenterTest {
         val settings = UserSettings(
             silenceMs = 800,
             maxUtteranceMs = 1000,
-            minUtteranceMs = 200,
-            energyThreshold = 200.0
+            minUtteranceMs = 200
         )
-        val segs = FileAudioSegmenter().segment(wav, settings).toList()
+        val segs = energySegmenter().segment(wav, settings).toList()
         assertTrue("expected multiple max-duration cuts, got ${segs.size}", segs.size >= 2)
         assertTrue(segs.any { it.reason == CutReason.MaxDuration })
     }

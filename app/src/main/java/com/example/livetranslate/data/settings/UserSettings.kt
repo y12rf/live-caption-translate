@@ -68,7 +68,11 @@ data class UserSettings(
     val silenceMs: Int = 500,
     val maxUtteranceMs: Int = 4_500,
     val minUtteranceMs: Int = 1_700,
-    val energyThreshold: Double = 400.0,
+    /**
+     * Silero VAD confidence mode: [SileroVadMode] name
+     * (NORMAL / AGGRESSIVE / VERY_AGGRESSIVE).
+     */
+    val sileroVadMode: String = SileroVadMode.NORMAL.name,
     val contextWindowSize: Int = 2,
     /**
      * Offline file / reprocess: VAD sentences packed into one ASR request.

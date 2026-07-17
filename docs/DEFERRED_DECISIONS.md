@@ -14,7 +14,7 @@
 | 8 | maxUtteranceMs | **4500**（代码默认） | 设置可改 |
 | 9 | silenceMs | **500** | — |
 | 10 | minUtteranceMs | **1700** | — |
-| 11 | energyThreshold | **400** | — |
+| 11 | sileroVadMode（原 energyThreshold） | **NORMAL** | Silero 2.0.6 |
 | 12 | 文件导入 | 录音管线（VAD + 时间轴） | 非离线标点通道 |
 | 13 | 事后重跑失败 | **软跳过 + 仍保存** | 非整次作废 |
 | 14 | 字幕默认 | Both + FullSentence + 16sp | — |

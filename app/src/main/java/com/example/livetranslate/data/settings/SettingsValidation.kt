@@ -29,8 +29,11 @@ object SettingsValidation {
         if (s.minUtteranceMs > s.maxUtteranceMs) {
             w += "Min utterance ms (${s.minUtteranceMs}) is greater than max (${s.maxUtteranceMs})"
         }
-        if (s.energyThreshold < 10.0 || s.energyThreshold > 50_000.0) {
-            w += "Energy threshold looks out of range (typical 50–5000, got ${s.energyThreshold})"
+        val mode = SileroVadMode.fromStorage(s.sileroVadMode)
+        if (s.sileroVadMode.isNotBlank() &&
+            !SileroVadMode.entries.any { it.name.equals(s.sileroVadMode.trim(), ignoreCase = true) }
+        ) {
+            w += "Silero VAD mode unknown (got ${s.sileroVadMode}); using ${mode.name}"
         }
         if (s.contextWindowSize < 0 || s.contextWindowSize > 20) {
             w += "Context window N should be 0–20 (got ${s.contextWindowSize})"
@@ -94,7 +97,7 @@ object SettingsValidation {
             silenceMs = s.silenceMs.coerceIn(50, 10_000),
             maxUtteranceMs = s.maxUtteranceMs.coerceIn(300, 120_000),
             minUtteranceMs = s.minUtteranceMs.coerceIn(0, 30_000),
-            energyThreshold = s.energyThreshold.coerceIn(1.0, 100_000.0),
+            sileroVadMode = SileroVadMode.fromStorage(s.sileroVadMode).name,
             contextWindowSize = s.contextWindowSize.coerceIn(0, 30),
             offlineVadBatchSize = s.offlineVadBatchSize.coerceIn(1, 200),
             titleTurnThreshold = s.titleTurnThreshold.coerceIn(1, 50),

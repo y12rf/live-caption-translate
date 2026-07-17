@@ -58,6 +58,7 @@ import com.example.livetranslate.data.asr.ApiAuthStyle
 import com.example.livetranslate.data.asr.AsrApiStyle
 import com.example.livetranslate.data.llm.LlmReasoningEffort
 import com.example.livetranslate.data.llm.LlmReasoningEffortStyle
+import com.example.livetranslate.data.settings.SileroVadMode
 import com.example.livetranslate.data.llm.LlmThinkingMode
 import com.example.livetranslate.data.settings.GlossaryEntry
 import com.example.livetranslate.data.settings.OverlayLayoutMode
@@ -799,13 +800,12 @@ private fun AudioPipelineCategoryContent(
         },
         onInfo = { onInfo(labels.minUttLabel, labels.minUttInfo) }
     )
-    field(
-        label = labels.energyLabel,
-        value = d.energyThreshold.toString(),
-        onChange = {
-            it.toDoubleOrNull()?.let { v -> onUpdate { s -> s.copy(energyThreshold = v) } }
-        },
-        onInfo = { onInfo(labels.energyLabel, labels.energyInfo) }
+    dropdownField(
+        label = labels.sileroModeLabel,
+        value = SileroVadMode.fromStorage(d.sileroVadMode).name,
+        options = SileroVadMode.entries.map { it.name },
+        onSelect = { onUpdate { s -> s.copy(sileroVadMode = it) } },
+        onInfo = { onInfo(labels.sileroModeLabel, labels.sileroModeInfo) }
     )
     field(
         label = labels.contextLabel,
@@ -823,7 +823,7 @@ private fun AudioPipelineCategoryContent(
                     silenceMs = def.silenceMs,
                     maxUtteranceMs = def.maxUtteranceMs,
                     minUtteranceMs = def.minUtteranceMs,
-                    energyThreshold = def.energyThreshold,
+                    sileroVadMode = def.sileroVadMode,
                     contextWindowSize = def.contextWindowSize
                 )
             }
@@ -1147,8 +1147,8 @@ private data class SettingsLabels(
     val maxUttInfo: String,
     val minUttLabel: String,
     val minUttInfo: String,
-    val energyLabel: String,
-    val energyInfo: String,
+    val sileroModeLabel: String,
+    val sileroModeInfo: String,
     val contextLabel: String,
     val contextInfo: String,
     val overlayFontLabel: String,
@@ -1247,8 +1247,8 @@ private fun rememberSettingsLabels(): SettingsLabels = SettingsLabels(
     maxUttInfo = stringResource(R.string.settings_info_max_utt_ms),
     minUttLabel = stringResource(R.string.settings_min_utt_ms),
     minUttInfo = stringResource(R.string.settings_info_min_utt_ms),
-    energyLabel = stringResource(R.string.settings_energy),
-    energyInfo = stringResource(R.string.settings_info_energy),
+    sileroModeLabel = stringResource(R.string.settings_silero_mode),
+    sileroModeInfo = stringResource(R.string.settings_info_silero_mode),
     contextLabel = stringResource(R.string.settings_context_n),
     contextInfo = stringResource(R.string.settings_info_context_n),
     overlayFontLabel = stringResource(R.string.settings_overlay_font_sp),

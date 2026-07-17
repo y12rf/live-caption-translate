@@ -17,6 +17,7 @@ import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.util.Log
+import com.example.livetranslate.data.settings.SileroVadMode
 import com.example.livetranslate.data.settings.UserSettings
 import com.example.livetranslate.domain.model.AudioSourceType
 import com.example.livetranslate.domain.model.UtteranceAudio
@@ -195,7 +196,7 @@ class AudioCapture(
         isRecording = false
         job?.cancel()
         job = null
-        activeVad?.reset()
+        releaseVad(activeVad)
         activeVad = null
         // Do not release VirtualDisplay / MediaProjection — resume reuses the same token.
     }
@@ -218,15 +219,15 @@ class AudioCapture(
         }
         job?.cancel()
         job = null
-        activeVad?.reset()
+        releaseVad(vad)
         activeVad = null
         // MediaProjection is stopped by RecordingService; display released via mediaProjection=null.
     }
 
     @SuppressLint("MissingPermission")
     private suspend fun loopMicrophone() {
-        val frameSamples = ASR_SAMPLE_RATE * FRAME_MS / 1000
-        val vad = createVad(frameSamples)
+        val frameSamples = VAD_FRAME_SAMPLES
+        val vad = createVad()
         activeVad = vad
 
         val minBuf = AudioRecord.getMinBufferSize(
@@ -245,16 +246,16 @@ class AudioCapture(
         )
         try {
             ensureRecording(recorder)
-            val frame = ShortArray(frameSamples)
+            val readBuf = ShortArray(frameSamples)
             // Carry partial reads so underruns do not discard audio mid-frame.
             var residual = ShortArray(0)
             while (running && scope.isActive) {
-                val read = recorder.read(frame, 0, frame.size)
+                val read = recorder.read(readBuf, 0, readBuf.size)
                 if (read <= 0) {
                     if (read < 0) Log.w(TAG, "mic read error $read")
                     continue
                 }
-                val combined = concatShorts(residual, frame, read)
+                val combined = concatShorts(residual, readBuf, read)
                 var offset = 0
                 while (offset + frameSamples <= combined.size) {
                     emitVad(vad, combined.copyOfRange(offset, offset + frameSamples))
@@ -268,7 +269,10 @@ class AudioCapture(
             }
         } finally {
             releaseRecorder(recorder)
-            if (activeVad === vad) activeVad = null
+            if (activeVad === vad) {
+                releaseVad(vad)
+                activeVad = null
+            }
         }
     }
 
@@ -417,8 +421,8 @@ class AudioCapture(
             .setChannelMask(fmt.channelMask)
             .build()
 
-        // frameSamplesCapture = total PCM samples (shorts) in one 20ms multi-channel frame
-        val frameSamplesCapture = fmt.sampleRate * FRAME_MS / 1000 * fmt.channels
+        // Capture chunk ~20ms multi-channel; VAD consumes fixed 512-sample @ 16 kHz frames.
+        val frameSamplesCapture = fmt.sampleRate * CAPTURE_FRAME_MS / 1000 * fmt.channels
         val frameBytes = frameSamplesCapture * BYTES_PER_SAMPLE
         val minBuf = AudioRecord.getMinBufferSize(
             fmt.sampleRate,
@@ -476,8 +480,8 @@ class AudioCapture(
             )
         }
 
-        val asrFrameSamples = ASR_SAMPLE_RATE * FRAME_MS / 1000
-        val vad = createVad(asrFrameSamples)
+        val asrFrameSamples = VAD_FRAME_SAMPLES
+        val vad = createVad()
         activeVad = vad
 
         try {
@@ -513,20 +517,34 @@ class AudioCapture(
             }
         } finally {
             releaseRecorder(recorder)
-            if (activeVad === vad) activeVad = null
+            if (activeVad === vad) {
+                releaseVad(vad)
+                activeVad = null
+            }
         }
     }
 
-    private fun createVad(frameSamples: Int): EnergyVad {
+    private fun createVad(): EnergyVad {
         val s = settings()
         return EnergyVad(
             sampleRate = ASR_SAMPLE_RATE,
-            frameSamples = frameSamples,
-            energyThreshold = s.energyThreshold,
+            frameSamples = VAD_FRAME_SAMPLES,
+            classifier = SileroSpeechClassifier(
+                context = appContext,
+                mode = SileroVadMode.fromStorage(s.sileroVadMode)
+            ),
             silenceMs = s.silenceMs,
             maxUtteranceMs = s.maxUtteranceMs,
             minUtteranceMs = s.minUtteranceMs
         )
+    }
+
+    private fun releaseVad(vad: EnergyVad?) {
+        if (vad == null) return
+        try {
+            vad.close()
+        } catch (_: Exception) {
+        }
     }
 
     private suspend fun emitVad(vad: EnergyVad, frame: ShortArray) {
@@ -626,9 +644,12 @@ class AudioCapture(
     companion object {
         private const val TAG = "AudioCapture"
         const val ASR_SAMPLE_RATE = 16_000
-        private const val FRAME_MS = 20
+        /** Silero frame size @ 16 kHz (~32 ms). */
+        val VAD_FRAME_SAMPLES: Int = SileroSpeechClassifier.FRAME_SAMPLES
+        /** Internal capture read chunk (ms); VAD still uses [VAD_FRAME_SAMPLES]. */
+        private const val CAPTURE_FRAME_MS = 20
         private const val BYTES_PER_SAMPLE = 2
-        /** ~1.2s of max-rate cuts at 20ms VAD; suspends rather than drop when full. */
+        /** Bounded utterance queue; suspends rather than drop when full. */
         private const val UTTERANCE_CHANNEL_CAP = 64
 
         /** @deprecated use [ASR_SAMPLE_RATE] */

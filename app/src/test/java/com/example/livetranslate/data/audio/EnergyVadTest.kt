@@ -25,7 +25,7 @@ class EnergyVadTest {
     ) = EnergyVad(
         sampleRate = sampleRate,
         frameSamples = frameSamples,
-        energyThreshold = threshold,
+        classifier = EnergySpeechClassifier(threshold),
         silenceMs = silenceMs,
         maxUtteranceMs = maxMs,
         minUtteranceMs = minMs
@@ -40,6 +40,7 @@ class EnergyVadTest {
         assertNotNull(secondQuiet.emit)
         assertEquals(CutReason.Silence, secondQuiet.emit!!.reason)
         assertTrue(secondQuiet.emit!!.pcm.isNotEmpty())
+        v.close()
     }
 
     @Test
@@ -50,6 +51,7 @@ class EnergyVadTest {
             if (v.accept(loudFrame()).emit != null) emitted++
         }
         assertEquals(1, emitted)
+        v.close()
     }
 
     @Test
@@ -59,5 +61,6 @@ class EnergyVadTest {
         val e1 = v.accept(quietFrame()).emit
         val e2 = v.accept(quietFrame()).emit
         assertTrue(e1 == null && e2 == null)
+        v.close()
     }
 }

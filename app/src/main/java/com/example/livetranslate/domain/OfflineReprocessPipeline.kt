@@ -11,6 +11,8 @@ import com.example.livetranslate.data.audio.SessionAudioRecorder
 import com.example.livetranslate.data.audio.WavChunker
 import com.example.livetranslate.data.history.HistoryRepository
 import com.example.livetranslate.data.llm.LlmClient
+import com.example.livetranslate.data.llm.LlmConfig
+import com.example.livetranslate.data.llm.LlmThinkingMode
 import com.example.livetranslate.data.network.NetworkErrors
 import com.example.livetranslate.data.network.NetworkMonitor
 import com.example.livetranslate.data.settings.SettingsRepository
@@ -277,7 +279,7 @@ class OfflineReprocessPipeline(
         // VAD cut sentences, pack every offlineVadBatchSize into one ASR upload.
         val batchSize = settings.offlineVadBatchSize.coerceIn(1, 200)
         val chunks = try {
-            WavChunker.chunkByVad(file, settings, batchSize) { progress, _ ->
+            WavChunker.chunkByVad(file, settings, appContext, batchSize) { progress, _ ->
                 _state.update {
                     it.copy(
                         message = str(
@@ -350,75 +352,73 @@ class OfflineReprocessPipeline(
         }
 
         checkCancel()
+        val sources = sentences.map { it.trim() }.filter { it.isNotEmpty() }
+        if (sources.isEmpty()) {
+            throw Exception(str(R.string.offline_split_empty))
+        }
+
         val window = ArrayDeque<ContextTurn>()
         val windowSize = settings.contextWindowSize.coerceAtLeast(0)
-        val segments = ArrayList<TranscriptSegment>(sentences.size)
+        val segments = ArrayList<TranscriptSegment>(sources.size)
         val startedAt = startedAtOverride ?: System.currentTimeMillis()
         var translateIncomplete = 0
+        val total = sources.size
 
-        for ((idx, sentence) in sentences.withIndex()) {
-            checkCancel()
-            val source = sentence.trim()
-            if (source.isEmpty()) continue
-
-            val (zh, incomplete) = if (settings.asrOnlyMode) {
+        if (settings.asrOnlyMode) {
+            for ((idx, source) in sources.withIndex()) {
+                checkCancel()
                 _state.update {
                     it.copy(
                         translateIndex = idx + 1,
-                        translateTotal = sentences.size,
-                        message = str(R.string.offline_asr_progress, idx + 1, sentences.size)
+                        translateTotal = total,
+                        message = str(R.string.offline_asr_progress, idx + 1, total)
                     )
                 }
-                "" to false
-            } else {
-                _state.update {
-                    it.copy(
-                        translateIndex = idx + 1,
-                        translateTotal = sentences.size,
-                        message = str(
-                            R.string.offline_translate_progress,
-                            idx + 1,
-                            sentences.size
-                        )
+                segments.add(
+                    TranscriptSegment(
+                        source = source,
+                        translation = "",
+                        cutReason = CutReason.Silence,
+                        incomplete = false,
+                        timestampMs = System.currentTimeMillis(),
+                        offsetMs = 0L
                     )
-                }
-                when (val outcome = translateSoft(source, window.toList(), settings)) {
-                    is SoftZh.Ok -> outcome.text to false
-                    is SoftZh.Incomplete -> {
-                        translateIncomplete++
-                        android.util.Log.w(
-                            TAG,
-                            "translate soft-fail sentence ${idx + 1}: ${outcome.reason}"
-                        )
-                        _state.update {
-                            it.copy(
-                                message = str(
-                                    R.string.offline_translate_skip,
-                                    idx + 1,
-                                    outcome.reason.take(80)
-                                )
-                            )
-                        }
-                        "" to true
-                    }
-                }
-            }
-            segments.add(
-                TranscriptSegment(
-                    source = source,
-                    translation = zh,
-                    cutReason = CutReason.Silence,
-                    incomplete = incomplete,
-                    timestampMs = System.currentTimeMillis(),
-                    // Prefer chunk-level offset when single-sentence; reprocess is
-                    // punctuation-based so offsets stay 0 (design).
-                    offsetMs = 0L
                 )
-            )
-            // Only feed successful pairs into context (avoid poisoning glossary/context)
-            if (!incomplete && zh.isNotBlank()) {
-                window.addLast(ContextTurn(source, zh))
-                while (window.size > windowSize) window.removeFirst()
+            }
+        } else {
+            // Batch many sources per LLM call (||| delimiter) — fewer round-trips.
+            val batches = BatchTranslation.chunkSources(sources, BatchTranslation.DEFAULT_BATCH_SIZE)
+            var done = 0
+            for ((batchIdx, batch) in batches.withIndex()) {
+                checkCancel()
+                val batchStart = done
+                _state.update {
+                    it.copy(
+                        translateIndex = (batchStart + 1).coerceAtMost(total),
+                        translateTotal = total,
+                        message = str(
+                            R.string.offline_translate_batch_progress,
+                            batchIdx + 1,
+                            batches.size,
+                            batchStart + 1,
+                            (batchStart + batch.size).coerceAtMost(total),
+                            total
+                        )
+                    )
+                }
+                val resolved = resolveBatchTranslations(
+                    batch = batch,
+                    batchIdx = batchIdx,
+                    batchTotal = batches.size,
+                    batchStart = batchStart,
+                    total = total,
+                    window = window,
+                    windowSize = windowSize,
+                    settings = settings
+                )
+                translateIncomplete += resolved.incompleteCount
+                segments.addAll(resolved.segments)
+                done += batch.size
             }
         }
 
@@ -579,6 +579,15 @@ class OfflineReprocessPipeline(
         data class Incomplete(val reason: String) : SoftZh()
     }
 
+    private sealed class SoftBatchZh {
+        data class Ok(
+            val translations: List<String>,
+            val countMismatch: Boolean = false
+        ) : SoftBatchZh()
+
+        data class Failed(val reason: String) : SoftBatchZh()
+    }
+
     /**
      * ASR with retries; on exhaustion returns [SoftAsr.Skip] instead of aborting the job.
      */
@@ -610,11 +619,222 @@ class OfflineReprocessPipeline(
         return SoftAsr.Skip(reason)
     }
 
+    private data class BatchResolveResult(
+        val segments: List<TranscriptSegment>,
+        val incompleteCount: Int
+    )
+
     /**
-     * Translate with retries; on exhaustion returns [SoftZh.Incomplete] (empty ZH)
-     * so the session can still be saved with source text.
+     * Batch translate → if segment count mismatches or some slots blank, fall back to
+     * one-by-one translate so source/translation stay aligned. Never drops sources.
      */
-    private suspend fun translateSoft(
+    private suspend fun resolveBatchTranslations(
+        batch: List<String>,
+        batchIdx: Int,
+        batchTotal: Int,
+        batchStart: Int,
+        total: Int,
+        window: ArrayDeque<ContextTurn>,
+        windowSize: Int,
+        settings: UserSettings
+    ): BatchResolveResult {
+        val outcome = translateBatchSoft(batch, window.toList(), settings)
+        val (zhList, usedSingleFallback) = when (outcome) {
+            is SoftBatchZh.Ok -> {
+                if (outcome.countMismatch) {
+                    // Misaligned batch is unsafe (later sentences shift) → discard and re-do 1:1.
+                    android.util.Log.w(
+                        TAG,
+                        "batch ${batchIdx + 1}: count mismatch (expected ${batch.size}); " +
+                            "fallback to single-sentence translate"
+                    )
+                    _state.update {
+                        it.copy(
+                            message = str(
+                                R.string.offline_translate_fallback_single,
+                                batchIdx + 1,
+                                batchTotal
+                            )
+                        )
+                    }
+                    translateSinglesFallback(
+                        batch, window.toList(), settings, batchStart, total
+                    ) to true
+                } else {
+                    // Count matches: re-translate only blank slots (keep alignment).
+                    val filled = outcome.translations.toMutableList()
+                    val local = ArrayDeque(window)
+                    val wSize = settings.contextWindowSize.coerceAtLeast(0)
+                    var anySingle = false
+                    for (i in batch.indices) {
+                        if (filled[i].isNotBlank()) {
+                            local.addLast(ContextTurn(batch[i], filled[i]))
+                            while (local.size > wSize) local.removeFirst()
+                            continue
+                        }
+                        checkCancel()
+                        _state.update {
+                            it.copy(
+                                translateIndex = (batchStart + i + 1).coerceAtMost(total),
+                                translateTotal = total,
+                                message = str(
+                                    R.string.offline_translate_progress,
+                                    batchStart + i + 1,
+                                    total
+                                )
+                            )
+                        }
+                        when (val one = translateOneSoft(batch[i], local.toList(), settings)) {
+                            is SoftZh.Ok -> {
+                                filled[i] = one.text
+                                anySingle = true
+                                local.addLast(ContextTurn(batch[i], one.text))
+                                while (local.size > wSize) local.removeFirst()
+                            }
+                            is SoftZh.Incomplete -> { /* leave blank */ }
+                        }
+                    }
+                    filled to anySingle
+                }
+            }
+            is SoftBatchZh.Failed -> {
+                android.util.Log.w(
+                    TAG,
+                    "batch ${batchIdx + 1}/${batchTotal} failed (${outcome.reason}); " +
+                        "fallback to single-sentence translate"
+                )
+                _state.update {
+                    it.copy(
+                        message = str(
+                            R.string.offline_translate_fallback_single,
+                            batchIdx + 1,
+                            batchTotal
+                        )
+                    )
+                }
+                translateSinglesFallback(
+                    batch, window.toList(), settings, batchStart, total
+                ) to true
+            }
+        }
+        if (usedSingleFallback) {
+            android.util.Log.i(TAG, "batch ${batchIdx + 1}: single fallback done")
+        }
+
+        var incompleteCount = 0
+        val segs = ArrayList<TranscriptSegment>(batch.size)
+        for (i in batch.indices) {
+            val source = batch[i]
+            val zh = zhList.getOrElse(i) { "" }.trim()
+            val incomplete = zh.isBlank()
+            if (incomplete) {
+                incompleteCount++
+                android.util.Log.w(
+                    TAG,
+                    "batch ${batchIdx + 1}: empty translation for sentence ${batchStart + i + 1}"
+                )
+            }
+            segs.add(
+                TranscriptSegment(
+                    source = source,
+                    translation = zh,
+                    cutReason = CutReason.Silence,
+                    incomplete = incomplete,
+                    timestampMs = System.currentTimeMillis(),
+                    offsetMs = 0L
+                )
+            )
+            if (!incomplete) {
+                window.addLast(ContextTurn(source, zh))
+                while (window.size > windowSize) window.removeFirst()
+            }
+        }
+        return BatchResolveResult(segs, incompleteCount)
+    }
+
+    /** One LLM call per source; returns list same size as [sources] (blank on soft fail). */
+    private suspend fun translateSinglesFallback(
+        sources: List<String>,
+        contextSeed: List<ContextTurn>,
+        settings: UserSettings,
+        batchStart: Int,
+        total: Int
+    ): List<String> {
+        val localWindow = ArrayDeque(contextSeed)
+        val windowSize = settings.contextWindowSize.coerceAtLeast(0)
+        val out = ArrayList<String>(sources.size)
+        for ((i, source) in sources.withIndex()) {
+            checkCancel()
+            _state.update {
+                it.copy(
+                    translateIndex = (batchStart + i + 1).coerceAtMost(total),
+                    translateTotal = total,
+                    message = str(
+                        R.string.offline_translate_progress,
+                        batchStart + i + 1,
+                        total
+                    )
+                )
+            }
+            when (val one = translateOneSoft(source, localWindow.toList(), settings)) {
+                is SoftZh.Ok -> {
+                    out.add(one.text)
+                    localWindow.addLast(ContextTurn(source, one.text))
+                    while (localWindow.size > windowSize) localWindow.removeFirst()
+                }
+                is SoftZh.Incomplete -> out.add("")
+            }
+        }
+        return out
+    }
+
+    /**
+     * Batch translate with retries; on exhaustion returns [SoftBatchZh.Failed]
+     * so the caller can fall back to single-sentence translate.
+     */
+    private suspend fun translateBatchSoft(
+        sources: List<String>,
+        context: List<ContextTurn>,
+        settings: UserSettings
+    ): SoftBatchZh {
+        require(sources.isNotEmpty())
+        val maxAttempts = settings.maxNetworkAttempts.coerceIn(1, 10)
+        var attempt = 0
+        var last: Exception? = null
+        while (attempt < maxAttempts) {
+            checkCancel()
+            try {
+                awaitOnline()
+                val raw = runTranslateBatch(sources, context, settings)
+                val parts = BatchTranslation.parseTranslations(raw, sources.size)
+                val nonBlank = parts.count { it.isNotBlank() }
+                if (nonBlank == 0) {
+                    return SoftBatchZh.Failed(str(R.string.offline_empty_translation))
+                }
+                return SoftBatchZh.Ok(
+                    translations = parts,
+                    countMismatch = BatchTranslation.hadCountMismatch(raw, sources.size)
+                )
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                last = e
+                attempt++
+                if (attempt >= maxAttempts || !isRetryable(e)) break
+                delay(500L * attempt * attempt)
+            }
+        }
+        val reason = NetworkErrors.userMessage(
+            last ?: Exception("translate failed"),
+            "batch×${sources.size}"
+        )
+        return SoftBatchZh.Failed(reason)
+    }
+
+    /**
+     * Single-utterance translate with retries (settings prompts). Soft-fail → empty ZH.
+     */
+    private suspend fun translateOneSoft(
         source: String,
         context: List<ContextTurn>,
         settings: UserSettings
@@ -626,7 +846,7 @@ class OfflineReprocessPipeline(
             checkCancel()
             try {
                 awaitOnline()
-                val zh = runTranslate(source, context, settings)
+                val zh = runTranslateOne(source, context, settings)
                 return if (zh.isBlank()) {
                     SoftZh.Incomplete(str(R.string.offline_empty_translation))
                 } else {
@@ -689,17 +909,29 @@ class OfflineReprocessPipeline(
         return AsrOutputSanitizer.clean(en)
     }
 
-    private suspend fun runTranslate(
+    private suspend fun runTranslateBatch(
+        sources: List<String>,
+        context: List<ContextTurn>,
+        settings: UserSettings
+    ): String {
+        val (system, user) = BatchTranslation.buildMessages(sources, context, settings)
+        // Offline batch prioritizes throughput: disable chain-of-thought overhead.
+        val config = settings.toLlmConfig().copy(
+            thinking = LlmThinkingMode.Disabled
+        )
+        return collectChat(system, user, config)
+    }
+
+    private suspend fun runTranslateOne(
         source: String,
         context: List<ContextTurn>,
         settings: UserSettings
     ): String {
+        val config = settings.toLlmConfig().copy(
+            thinking = LlmThinkingMode.Disabled
+        )
         var zh = ""
-        llm.translateStream(
-            source,
-            context,
-            settings.toLlmConfig()
-        ).collect { ev ->
+        llm.translateStream(source, context, config).collect { ev ->
             when (ev) {
                 is LlmStreamEvent.Delta -> zh += ev.text
                 is LlmStreamEvent.Completed -> {
@@ -713,9 +945,30 @@ class OfflineReprocessPipeline(
                 }
             }
         }
-        zh = LlmClient.stripThinkingArtifacts(zh)
-        // Blank handled by translateSoft → Incomplete (do not abort whole job)
-        return zh.trim()
+        return LlmClient.stripThinkingArtifacts(zh).trim()
+    }
+
+    private suspend fun collectChat(
+        system: String,
+        user: String,
+        config: LlmConfig
+    ): String {
+        var zh = ""
+        llm.chatStream(system, user, config).collect { ev ->
+            when (ev) {
+                is LlmStreamEvent.Delta -> zh += ev.text
+                is LlmStreamEvent.Completed -> {
+                    if (ev.fullText.isNotEmpty()) {
+                        zh = LlmClient.stripThinkingArtifacts(ev.fullText)
+                    }
+                }
+                is LlmStreamEvent.Error -> {
+                    val ex = Exception(ev.throwable.message ?: "LLM error", ev.throwable)
+                    if (ev.retryable) throw Retryable(ex) else throw ex
+                }
+            }
+        }
+        return LlmClient.stripThinkingArtifacts(zh).trim()
     }
 
     private fun isRetryable(e: Exception): Boolean {

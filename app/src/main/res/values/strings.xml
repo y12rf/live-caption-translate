@@ -161,6 +161,9 @@
     <string name="offline_vad_progress">VAD segmenting %1$d%%</string>
     <string name="offline_asr_progress">Recognizing batch %1$d/%2$d</string>
     <string name="offline_translate_progress">Translating %1$d/%2$d</string>
+    <string name="offline_translate_batch_progress">Translating batch %1$d/%2$d (sentences %3$d–%4$d of %5$d)</string>
+    <string name="offline_translate_batch_skip">Translate batch %1$d/%2$d skipped — %3$s</string>
+    <string name="offline_translate_fallback_single">Batch %1$d/%2$d segment mismatch or failed — retrying one sentence at a time…</string>
     <string name="offline_saving">Saving session…</string>
     <string name="offline_saved">Saved: %1$s</string>
     <string name="offline_saved_partial">Saved: %1$s (ASR skipped %2$d batch(es), %3$d sentence(s) without translation)</string>
@@ -244,6 +247,7 @@
     <string name="settings_max_utt_ms">Max utterance ms</string>
     <string name="settings_min_utt_ms">Min utterance ms</string>
     <string name="settings_energy">Energy threshold</string>
+    <string name="settings_silero_mode">Silero VAD mode</string>
     <string name="settings_context_n">Context window N</string>
     <string name="settings_overlay_w">Overlay max width (dp)</string>
     <string name="settings_overlay_h">Overlay max height (dp)</string>
@@ -291,11 +295,12 @@
     <string name="settings_info_languages">Languages sent to ASR / LLM (not the app UI language).\nUse short codes such as en, zh, ja, or names your API accepts.</string>
     <string name="settings_info_input_lang">Source language for ASR and LLM (e.g. en).</string>
     <string name="settings_info_output_lang">Target language for translation (e.g. zh). Ignored in ASR-only mode.</string>
-    <string name="settings_info_vad">Energy VAD parameters:\n• Silence ms — end-of-utterance silence\n• Max utterance ms — force cut length\n• Min utterance ms — drop short clips\n• Energy threshold — speech energy\n• Context window N — LLM history turns</string>
+    <string name="settings_info_vad">Silero DNN VAD + utterance rules:\n• Silence ms — end-of-utterance silence\n• Max utterance ms — force cut length\n• Min utterance ms — drop short clips\n• Silero mode — model confidence (NORMAL / AGGRESSIVE / VERY_AGGRESSIVE)\n• Context window N — LLM history turns</string>
     <string name="settings_info_silence_ms">How long continuous silence ends an utterance (ms). Typical 300–800.</string>
     <string name="settings_info_max_utt_ms">Force-cut length if speech never pauses (ms). Lower = faster latency, more cuts.</string>
     <string name="settings_info_min_utt_ms">Drop clips shorter than this (ms) to reduce noise false triggers.</string>
     <string name="settings_info_energy">RMS energy gate for speech vs silence. Raise in noisy rooms; lower if soft speech is missed.</string>
+    <string name="settings_info_silero_mode">Silero score threshold mode:\n• NORMAL — balanced (default)\n• AGGRESSIVE — fewer false speech hits\n• VERY_AGGRESSIVE — strictest; may miss soft speech\n\nFrame size is fixed at 512 samples @ 16 kHz (~32 ms).</string>
     <string name="settings_info_context_n">How many previous EN/ZH pairs are sent as LLM context for terminology consistency.</string>
     <string name="settings_info_overlay">Floating caption over other apps:\n• Content mode / layout / font size\n• Size, colors, opacity\n• Stack order (translation vs source on top)\n\nLock/unlock from the recording notification; unlocked = drag, locked = touch-through.</string>
     <string name="settings_info_overlay_font">Floating overlay text size in sp (10–48).</string>

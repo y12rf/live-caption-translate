@@ -2,7 +2,7 @@
 
 **v1.0.0** · Kotlin + Jetpack Compose
 
-音频采集 → 能量 VAD 切句 → OpenAI 兼容 **ASR stream** → **LLM stream** 翻译 → 双语实时 UI / 悬浮字幕 → Room 历史 + 整场 WAV 存档。
+音频采集 → Silero VAD 切句 → OpenAI 兼容 **ASR stream** → **LLM stream** 翻译 → 双语实时 UI / 悬浮字幕 → Room 历史 + 整场 WAV 存档。
 
 适合上课听讲做笔记：自备 ASR / LLM API（不硬编码密钥）。
 
@@ -10,8 +10,8 @@
 
 | 能力 | 说明 |
 |------|------|
-| 麦克风 / 内录 / 文件 | 麦克风；内部音频（API 29+）；**本地文件**走录音管线（FFmpeg → 能量 VAD → 带时间轴 offset 的 ASR/LLM） |
-| 切句 | 能量 VAD：静音切句 + `maxUtteranceMs` 强制截断 |
+| 麦克风 / 内录 / 文件 | 麦克风；内部音频（API 29+）；**本地文件**走录音管线（FFmpeg → Silero VAD → 带时间轴 offset 的 ASR/LLM） |
+| 切句 | Silero DNN VAD：静音切句 + `maxUtteranceMs` 强制截断 |
 | ASR / LLM | 流式 SSE；多鉴权；完整 URL 或 OpenAI 路径拼接；可选 `thinking` 字段（写在 messages 后）；响应剥离 thinking 内容 |
 | 只识别 | 设置开启后跳过 LLM，仅 ASR |
 | 管线 | ASR 与 LLM 分队列：下句 ASR 可与上句翻译并行，句序 FIFO |
@@ -55,7 +55,7 @@ ui/          Compose + ViewModel（Live / History / Settings）
 domain/      SessionOrchestrator（实时 + 文件 VAD 管线）
              OfflineReprocessPipeline（历史/orphan 事后重跑，软失败兜底）
 data/
-  audio/     AudioCapture · EnergyVad · FFmpeg · FileAudioSegmenter · SessionAudioRecorder
+  audio/     AudioCapture · SileroSpeechClassifier · EnergyVad · FFmpeg · FileAudioSegmenter · SessionAudioRecorder
   asr/       OpenAI transcriptions / chat-audio 流式
   llm/       Chat completions 流式翻译 + 标题；thinking 过滤
   settings/  DataStore · UserSettings · OverlayTextMode / OverlayLayoutMode
@@ -70,7 +70,8 @@ service/     RecordingService · SubtitleOverlayService
 | `silenceMs` | 500 |
 | `maxUtteranceMs` | 4500 |
 | `minUtteranceMs` | 1700 |
-| `energyThreshold` | 400 |
+| `sileroVadMode` | NORMAL |
+| 帧长 | 512 samples @ 16 kHz（~32 ms，Silero 固定） |
 
 ## 权限
 

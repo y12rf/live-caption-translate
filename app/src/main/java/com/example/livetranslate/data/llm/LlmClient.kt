@@ -33,14 +33,7 @@ class LlmClient(
         sourceText: String,
         context: List<ContextTurn>,
         config: LlmConfig
-    ): Flow<LlmStreamEvent> = callbackFlow {
-        // fullUrl=true → as-is; else full path after /v1/ as-is, otherwise append /v1/chat/completions
-        val url = ApiUrlResolver.resolve(
-            config.baseUrl,
-            "/v1/chat/completions",
-            fullUrl = config.fullUrl
-        )
-
+    ): Flow<LlmStreamEvent> {
         val from = config.sourceLanguage.trim().ifBlank { "source" }
         val to = config.targetLanguage.trim().ifBlank { "target" }
         val historyBlock = if (context.isEmpty()) {
@@ -65,6 +58,25 @@ class LlmClient(
             .replace("{{to}}", to)
             .replace("{{history}}", historyBlock)
             .replace("{{text}}", sourceText)
+
+        return chatStream(system, user, config)
+    }
+
+    /**
+     * Streaming chat completion with explicit system/user content
+     * (used by offline batch translate and [translateStream]).
+     */
+    fun chatStream(
+        system: String,
+        user: String,
+        config: LlmConfig
+    ): Flow<LlmStreamEvent> = callbackFlow {
+        // fullUrl=true → as-is; else full path after /v1/ as-is, otherwise append /v1/chat/completions
+        val url = ApiUrlResolver.resolve(
+            config.baseUrl,
+            "/v1/chat/completions",
+            fullUrl = config.fullUrl
+        )
 
         // Build JSON as string (avoids Android JSONObject unit-test stubs).
         // thinking / reasoning_effort (or output_config) after messages.

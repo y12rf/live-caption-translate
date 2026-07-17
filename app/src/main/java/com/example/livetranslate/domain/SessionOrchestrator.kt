@@ -129,7 +129,7 @@ class SessionOrchestrator(
     private val translationCache = TranslationCache(TranslationCache.DEFAULT_MAX_SIZE)
     private val diskQueue = UtteranceDiskQueue(this.appContext)
     private val ffmpegConverter = FfmpegAudioConverter()
-    private val fileSegmenter = FileAudioSegmenter()
+    private val fileSegmenter = FileAudioSegmenter(appContext = this.appContext)
 
     private val asrInFlight = AtomicInteger(0)
     private val llmInFlight = AtomicInteger(0)
@@ -367,7 +367,7 @@ class SessionOrchestrator(
 
         val settings = effectiveSettings(settingsRepo.settings.first())
         var uttered = 0
-        _state.update { it.copy(importStatus = "能量 VAD 切句中…") }
+        _state.update { it.copy(importStatus = "Silero VAD 切句中…") }
         fileSegmenter.segment(File(sessionPath), settings) { progress, elapsedMs ->
             recordedElapsedMs = elapsedMs
             _state.update {

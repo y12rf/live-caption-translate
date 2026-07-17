@@ -5,7 +5,6 @@ import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.MutablePreferences
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.booleanPreferencesKey
-import androidx.datastore.preferences.core.doublePreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
@@ -47,7 +46,7 @@ class SettingsRepository(private val context: Context) {
         val silenceMs = intPreferencesKey("silence_ms")
         val maxUtteranceMs = intPreferencesKey("max_utterance_ms")
         val minUtteranceMs = intPreferencesKey("min_utterance_ms")
-        val energyThreshold = doublePreferencesKey("energy_threshold")
+        val sileroVadMode = stringPreferencesKey("silero_vad_mode")
         val contextWindowSize = intPreferencesKey("context_window_size")
         val offlineVadBatchSize = intPreferencesKey("offline_vad_batch_size")
         val titleTurnThreshold = intPreferencesKey("title_turn_threshold")
@@ -106,7 +105,7 @@ class SettingsRepository(private val context: Context) {
             silenceMs = p[Keys.silenceMs] ?: d.silenceMs,
             maxUtteranceMs = p[Keys.maxUtteranceMs] ?: d.maxUtteranceMs,
             minUtteranceMs = p[Keys.minUtteranceMs] ?: d.minUtteranceMs,
-            energyThreshold = p[Keys.energyThreshold] ?: d.energyThreshold,
+            sileroVadMode = SileroVadMode.fromStorage(p[Keys.sileroVadMode] ?: d.sileroVadMode).name,
             contextWindowSize = p[Keys.contextWindowSize] ?: d.contextWindowSize,
             offlineVadBatchSize = p[Keys.offlineVadBatchSize] ?: d.offlineVadBatchSize,
             titleTurnThreshold = p[Keys.titleTurnThreshold] ?: d.titleTurnThreshold,
@@ -166,7 +165,7 @@ class SettingsRepository(private val context: Context) {
         prefs[Keys.silenceMs] = next.silenceMs
         prefs[Keys.maxUtteranceMs] = next.maxUtteranceMs
         prefs[Keys.minUtteranceMs] = next.minUtteranceMs
-        prefs[Keys.energyThreshold] = next.energyThreshold
+        prefs[Keys.sileroVadMode] = SileroVadMode.fromStorage(next.sileroVadMode).name
         prefs[Keys.contextWindowSize] = next.contextWindowSize
         prefs[Keys.offlineVadBatchSize] = next.offlineVadBatchSize
         prefs[Keys.titleTurnThreshold] = next.titleTurnThreshold

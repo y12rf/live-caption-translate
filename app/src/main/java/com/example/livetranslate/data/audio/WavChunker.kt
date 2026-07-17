@@ -1,5 +1,6 @@
 package com.example.livetranslate.data.audio
 
+import android.content.Context
 import com.example.livetranslate.data.settings.UserSettings
 import com.example.livetranslate.domain.model.UtteranceAudio
 import kotlinx.coroutines.flow.toList
@@ -10,7 +11,7 @@ import java.nio.ByteOrder
 /**
  * Offline ASR batching helpers.
  *
- * Preferred path: energy VAD → pack every [UTTERANCES_PER_ASR] sentences into one ASR upload.
+ * Preferred path: Silero VAD → pack every [UTTERANCES_PER_ASR] sentences into one ASR upload.
  * Legacy time-slice [chunkPcm] remains for tests / fallback.
  */
 object WavChunker {
@@ -52,17 +53,18 @@ object WavChunker {
     }
 
     /**
-     * Energy VAD over the whole WAV, then merge every [utterancesPerBatch] cuts into one PCM blob for ASR.
+     * Silero VAD over the whole WAV, then merge every [utterancesPerBatch] cuts into one PCM blob for ASR.
      * Last batch may be shorter than [utterancesPerBatch].
      */
     suspend fun chunkByVad(
         file: File,
         settings: UserSettings,
+        appContext: Context,
         utterancesPerBatch: Int = UTTERANCES_PER_ASR,
         onProgress: (progress: Float, elapsedMs: Long) -> Unit = { _, _ -> }
     ): List<PcmChunk> {
         require(utterancesPerBatch > 0)
-        val segmenter = FileAudioSegmenter()
+        val segmenter = FileAudioSegmenter(appContext = appContext)
         val utterances = segmenter.segment(file, settings, onProgress).toList()
         return packVadUtterances(utterances, utterancesPerBatch)
     }

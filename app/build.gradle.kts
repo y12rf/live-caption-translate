@@ -64,6 +64,18 @@ android {
     }
 }
 
+// android-vad:silero pulls Kotlin 2.x stdlib; project compiler is 1.9.x — pin stdlib.
+configurations.configureEach {
+    resolutionStrategy {
+        force(
+            "org.jetbrains.kotlin:kotlin-stdlib:1.9.24",
+            "org.jetbrains.kotlin:kotlin-stdlib-jdk7:1.9.24",
+            "org.jetbrains.kotlin:kotlin-stdlib-jdk8:1.9.24",
+            "org.jetbrains.kotlin:kotlin-stdlib-common:1.9.24"
+        )
+    }
+}
+
 dependencies {
     val composeBom = platform("androidx.compose:compose-bom:2024.06.00")
     implementation(composeBom)
@@ -90,6 +102,10 @@ dependencies {
 
     // Community rebuild of retired arthenica ffmpeg-kit (audio package, FFmpeg 8.x)
     implementation("com.antonkarpenko:ffmpeg-kit-audio:2.2.1")
+
+    // Silero VAD (ONNX) — frame speech/noise classifier for utterance cuts.
+    // 2.0.10 is built with Kotlin 2.2 metadata (incompatible with this project's 1.9.x).
+    implementation("com.github.gkonovalov.android-vad:silero:2.0.6")
 
     debugImplementation("androidx.compose.ui:ui-tooling")
     testImplementation("junit:junit:4.13.2")
