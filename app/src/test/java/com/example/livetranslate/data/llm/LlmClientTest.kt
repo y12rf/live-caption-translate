@@ -50,10 +50,9 @@ class LlmClientTest {
             val completed = events.filterIsInstance<LlmStreamEvent.Completed>().single()
             assertEquals("你好", completed.fullText)
             val body = server.takeRequest().body.readUtf8()
-            // Default LlmConfig thinking = Enabled → object form + high effort
-            assertTrue(body.contains("\"thinking\":{\"type\":\"enabled\"}"))
-            assertTrue(body.contains("\"reasoning_effort\":\"high\""))
-            assertTrue(!body.contains("\"thinking\":true"))
+            // Default LlmConfig thinking = Default → omit thinking fields
+            assertTrue(!body.contains("\"thinking\""))
+            assertTrue(!body.contains("reasoning_effort"))
         } finally {
             server.shutdown()
         }
@@ -83,8 +82,7 @@ class LlmClientTest {
                     systemPrompt = "t",
                     fullUrl = true,
                     thinking = LlmThinkingMode.Enabled,
-                    reasoningEffort = LlmReasoningEffort.Max,
-                    reasoningEffortStyle = LlmReasoningEffortStyle.OpenAi
+                    reasoningEffort = LlmReasoningEffort.Max
                 )
             ).toList()
             val req = server.takeRequest()

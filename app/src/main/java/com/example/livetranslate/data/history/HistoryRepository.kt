@@ -76,6 +76,34 @@ class HistoryRepository(context: Context) {
         }
     }
 
+    /**
+     * Update one segment's source / translation text.
+     * Both non-empty → clear [incomplete]; otherwise keep prior flag (ASR-only may have empty ZH).
+     * @return true if a row was updated
+     */
+    suspend fun updateSegmentText(
+        segmentId: Long,
+        source: String,
+        translation: String
+    ): Boolean {
+        val existing = dao.getSegment(segmentId) ?: return false
+        val src = source.trim()
+        val zh = translation.trim()
+        val incomplete = when {
+            src.isNotEmpty() && zh.isNotEmpty() -> false
+            src.isEmpty() && zh.isEmpty() -> true
+            else -> existing.incomplete
+        }
+        return dao.updateSegmentText(segmentId, src, zh, incomplete) > 0
+    }
+
+    /** Rename session title (stored in [SessionEntity.previewZh]). */
+    suspend fun updateSessionTitle(sessionId: Long, title: String): Boolean {
+        val t = title.trim().take(200)
+        if (t.isEmpty()) return false
+        return dao.updateSessionTitle(sessionId, t) > 0
+    }
+
     companion object {
         /** Drop SQL LIKE meta-chars so user query is literal substring match. */
         fun sanitizeSearchQuery(raw: String): String =

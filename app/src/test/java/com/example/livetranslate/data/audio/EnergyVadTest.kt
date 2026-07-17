@@ -26,7 +26,7 @@ class EnergyVadTest {
         sampleRate = sampleRate,
         frameSamples = frameSamples,
         classifier = EnergySpeechClassifier(threshold),
-        silenceMs = silenceMs,
+        postSpeechQuietMs = silenceMs,
         maxUtteranceMs = maxMs,
         minUtteranceMs = minMs
     )
@@ -55,12 +55,32 @@ class EnergyVadTest {
     }
 
     @Test
-    fun tooShort_dropped() {
+    fun tooShort_heldNotEmitted_thenMergedIntoNext() {
+        // frame = 20ms @ 16k/320; min=100ms → need ≥5 voiced frames
+        // postSpeechQuietMs=20 → 1 quiet frame triggers a silence-cut attempt
+        val v = vad(silenceMs = 20, maxMs = 10_000, minMs = 100, frameSamples = 320)
+        // 1 loud frame (~20ms) then silence → under min, hold (no emit)
+        assertNull(v.accept(loudFrame()).emit)
+        assertNull(v.accept(quietFrame()).emit)
+
+        // more speech + silence → total voiced enough → one merged emit
+        repeat(4) { assertNull(v.accept(loudFrame()).emit) }
+        val merged = v.accept(quietFrame()).emit
+        assertNotNull(merged)
+        assertEquals(CutReason.Silence, merged!!.reason)
+        // held first loud + 4 more loud frames of PCM at least
+        assertTrue(merged.pcm.size >= 5 * 320 * 2)
+        v.close()
+    }
+
+    @Test
+    fun tooShort_flushStop_emitsHeld() {
         val v = vad(silenceMs = 20, maxMs = 10_000, minMs = 100)
         v.accept(loudFrame())
-        val e1 = v.accept(quietFrame()).emit
-        val e2 = v.accept(quietFrame()).emit
-        assertTrue(e1 == null && e2 == null)
+        assertNull(v.accept(quietFrame()).emit) // under min → hold
+        val flush = v.flushStop().emit
+        assertNotNull(flush)
+        assertEquals(CutReason.StopFlush, flush!!.reason)
         v.close()
     }
 }

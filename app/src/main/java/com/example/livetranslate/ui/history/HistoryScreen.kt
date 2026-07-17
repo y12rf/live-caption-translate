@@ -2,6 +2,8 @@ package com.example.livetranslate.ui.history
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -17,10 +19,11 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.Pause
+import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Button
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -35,6 +38,8 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.TextField
+import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -45,8 +50,13 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -54,6 +64,7 @@ import com.example.livetranslate.R
 import com.example.livetranslate.data.audio.SessionAudioRecorder
 import com.example.livetranslate.data.history.ExportTextMode
 import com.example.livetranslate.data.history.HistoryExport
+import com.example.livetranslate.data.history.SegmentEntity
 import com.example.livetranslate.domain.ReprocessPhase
 import com.example.livetranslate.util.RecordingShareHelper
 import java.text.SimpleDateFormat
@@ -61,7 +72,7 @@ import java.util.Date
 import java.util.Locale
 import java.util.concurrent.TimeUnit
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
 fun HistoryScreen(
     viewModel: HistoryViewModel,
@@ -73,6 +84,20 @@ fun HistoryScreen(
     val fmt = SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.getDefault())
     var listMenuSessionId by remember { mutableStateOf<Long?>(null) }
     var listDeleteId by remember { mutableStateOf<Long?>(null) }
+    var listEditTitle by remember { mutableStateOf<Pair<Long, String>?>(null) }
+    var listSearchOpen by remember { mutableStateOf(false) }
+    val listSearchFocus = remember { FocusRequester() }
+
+    listEditTitle?.let { (id, current) ->
+        TitleEditDialog(
+            initial = current,
+            onDismiss = { listEditTitle = null },
+            onSave = { title ->
+                viewModel.updateSessionTitle(title, sessionId = id)
+                listEditTitle = null
+            }
+        )
+    }
 
     if (listDeleteId != null) {
         AlertDialog(
@@ -98,13 +123,55 @@ fun HistoryScreen(
         )
     }
 
+    LaunchedEffect(listSearchOpen) {
+        if (listSearchOpen) {
+            listSearchFocus.requestFocus()
+        }
+    }
+
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text(stringResource(R.string.history)) },
+                title = {
+                    if (listSearchOpen) {
+                        TopBarSearchField(
+                            value = query,
+                            onValueChange = viewModel::setListQuery,
+                            placeholder = stringResource(R.string.history_search_hint),
+                            focusRequester = listSearchFocus
+                        )
+                    } else {
+                        Text(stringResource(R.string.history))
+                    }
+                },
                 navigationIcon = {
-                    IconButton(onClick = onBack) {
+                    IconButton(
+                        onClick = {
+                            if (listSearchOpen) {
+                                listSearchOpen = false
+                                viewModel.setListQuery("")
+                            } else {
+                                onBack()
+                            }
+                        }
+                    ) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+                    }
+                },
+                actions = {
+                    if (listSearchOpen) {
+                        if (query.isNotEmpty()) {
+                            IconButton(onClick = { viewModel.setListQuery("") }) {
+                                Icon(Icons.Default.Clear, contentDescription = "Clear")
+                            }
+                        }
+                    } else {
+                        IconButton(onClick = { listSearchOpen = true }) {
+                            Icon(
+                                Icons.Default.Search,
+                                contentDescription = stringResource(R.string.history_search_action)
+                            )
+                        }
                     }
                 }
             )
@@ -115,25 +182,6 @@ fun HistoryScreen(
                 .fillMaxSize()
                 .padding(padding)
         ) {
-            OutlinedTextField(
-                value = query,
-                onValueChange = viewModel::setListQuery,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 8.dp),
-                singleLine = true,
-                label = { Text(stringResource(R.string.history_search_hint)) },
-                leadingIcon = {
-                    Icon(Icons.Default.Search, contentDescription = null)
-                },
-                trailingIcon = {
-                    if (query.isNotEmpty()) {
-                        IconButton(onClick = { viewModel.setListQuery("") }) {
-                            Icon(Icons.Default.Clear, contentDescription = "Clear")
-                        }
-                    }
-                }
-            )
             when {
                 sessions.isEmpty() && query.isBlank() -> {
                     Text(
@@ -187,7 +235,12 @@ fun HistoryScreen(
                                 },
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .clickable { onOpenDetail(s.id) }
+                                    .combinedClickable(
+                                        onClick = { onOpenDetail(s.id) },
+                                        onLongClick = {
+                                            listEditTitle = s.id to s.previewZh
+                                        }
+                                    )
                             )
                             HorizontalDivider()
                         }
@@ -198,7 +251,7 @@ fun HistoryScreen(
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
 fun HistoryDetailScreen(
     sessionId: Long,
@@ -213,9 +266,15 @@ fun HistoryDetailScreen(
     val reprocess by viewModel.reprocessState.collectAsStateWithLifecycle()
     val deletedId by viewModel.deletedSessionId.collectAsStateWithLifecycle()
     val context = LocalContext.current
+    val clipboard = LocalClipboardManager.current
     val wallFmt = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault())
     var menuOpen by remember { mutableStateOf(false) }
     var deleteConfirmOpen by remember { mutableStateOf(false) }
+    var editingSegment by remember { mutableStateOf<SegmentEntity?>(null) }
+    var editingTitle by remember { mutableStateOf(false) }
+    var detailSearchOpen by remember { mutableStateOf(false) }
+    var playbackPanelOpen by remember { mutableStateOf(false) }
+    val detailSearchFocus = remember { FocusRequester() }
     val listState = rememberLazyListState()
 
     LaunchedEffect(sessionId) {
@@ -249,6 +308,29 @@ fun HistoryDetailScreen(
             ).show()
             onBack()
         }
+    }
+
+    editingSegment?.let { seg ->
+        SegmentEditDialog(
+            segment = seg,
+            onDismiss = { editingSegment = null },
+            onSave = { source, translation ->
+                viewModel.updateSegmentText(seg.id, source, translation)
+                editingSegment = null
+            }
+        )
+    }
+
+    if (editingTitle) {
+        val currentTitle = detail?.session?.previewZh.orEmpty()
+        TitleEditDialog(
+            initial = currentTitle,
+            onDismiss = { editingTitle = false },
+            onSave = { title ->
+                viewModel.updateSessionTitle(title)
+                editingTitle = false
+            }
+        )
     }
 
     if (deleteConfirmOpen) {
@@ -310,33 +392,85 @@ fun HistoryDetailScreen(
         )
     }
 
+    val canPlay = playback.hasTimeline && playback.prepared
+
+    // Keep seek panel open while playing so progress stays visible.
+    LaunchedEffect(playback.playing) {
+        if (playback.playing) playbackPanelOpen = true
+    }
+
+    LaunchedEffect(detailSearchOpen) {
+        if (detailSearchOpen) detailSearchFocus.requestFocus()
+    }
+
     Scaffold(
         topBar = {
             TopAppBar(
                 title = {
-                    val t = detail?.session?.previewZh?.takeIf { it.isNotBlank() }
-                    Text(t ?: "Session", maxLines = 1)
+                    if (detailSearchOpen) {
+                        TopBarSearchField(
+                            value = detailQuery,
+                            onValueChange = viewModel::setDetailQuery,
+                            placeholder = stringResource(R.string.detail_search_hint),
+                            focusRequester = detailSearchFocus
+                        )
+                    } else {
+                        val t = detail?.session?.previewZh?.takeIf { it.isNotBlank() }
+                        Text(
+                            t ?: "Session",
+                            maxLines = 1,
+                            modifier = Modifier.combinedClickable(
+                                onClick = {},
+                                onLongClick = { editingTitle = true }
+                            )
+                        )
+                    }
                 },
                 navigationIcon = {
-                    IconButton(onClick = onBack) {
+                    IconButton(
+                        onClick = {
+                            if (detailSearchOpen) {
+                                detailSearchOpen = false
+                                viewModel.setDetailQuery("")
+                            } else {
+                                onBack()
+                            }
+                        }
+                    ) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
                     }
                 },
                 actions = {
-                    IconButton(onClick = {
-                        val srt = viewModel.prepareSrt(ExportTextMode.Both)
-                        if (srt == null) {
-                            toastEmpty()
-                            return@IconButton
+                    if (detailSearchOpen) {
+                        if (detailQuery.isNotEmpty()) {
+                            IconButton(onClick = { viewModel.setDetailQuery("") }) {
+                                Icon(Icons.Default.Clear, contentDescription = "Clear")
+                            }
                         }
-                        RecordingShareHelper.shareText(
-                            context,
-                            srt,
-                            chooserTitle = context.getString(R.string.share_srt_chooser),
-                            mimeType = "application/x-subrip"
-                        )
-                    }) {
-                        Icon(Icons.Default.Share, contentDescription = "Share SRT")
+                    } else {
+                        IconButton(onClick = { detailSearchOpen = true }) {
+                            Icon(
+                                Icons.Default.Search,
+                                contentDescription = stringResource(R.string.history_search_action)
+                            )
+                        }
+                    }
+                    if (canPlay) {
+                        IconButton(
+                            onClick = {
+                                // First tap expands panel; also toggles play/pause.
+                                if (!playbackPanelOpen) playbackPanelOpen = true
+                                viewModel.togglePlayPause()
+                            }
+                        ) {
+                            Icon(
+                                if (playback.playing) Icons.Default.Pause else Icons.Default.PlayArrow,
+                                contentDescription = stringResource(
+                                    if (playback.playing) R.string.playback_pause
+                                    else R.string.playback_play
+                                )
+                            )
+                        }
                     }
                     IconButton(onClick = { menuOpen = true }) {
                         Icon(Icons.Default.MoreVert, contentDescription = "More")
@@ -345,6 +479,24 @@ fun HistoryDetailScreen(
                         expanded = menuOpen,
                         onDismissRequest = { menuOpen = false }
                     ) {
+                        if (canPlay) {
+                            DropdownMenuItem(
+                                text = {
+                                    Text(
+                                        if (playbackPanelOpen) {
+                                            stringResource(R.string.history_playback_hide)
+                                        } else {
+                                            stringResource(R.string.history_playback_expand)
+                                        }
+                                    )
+                                },
+                                onClick = {
+                                    menuOpen = false
+                                    playbackPanelOpen = !playbackPanelOpen
+                                }
+                            )
+                            HorizontalDivider()
+                        }
                         val reprocessEnabled = viewModel.canReprocess() &&
                             reprocess.phase == ReprocessPhase.Idle
                         DropdownMenuItem(
@@ -375,6 +527,23 @@ fun HistoryDetailScreen(
                             enabled = reprocess.phase == ReprocessPhase.Idle
                         )
                         HorizontalDivider()
+                        DropdownMenuItem(
+                            text = { Text(stringResource(R.string.share_srt)) },
+                            onClick = {
+                                menuOpen = false
+                                val srt = viewModel.prepareSrt(ExportTextMode.Both)
+                                if (srt == null) {
+                                    toastEmpty()
+                                } else {
+                                    RecordingShareHelper.shareText(
+                                        context,
+                                        srt,
+                                        chooserTitle = context.getString(R.string.share_srt_chooser),
+                                        mimeType = "application/x-subrip"
+                                    )
+                                }
+                            }
+                        )
                         DropdownMenuItem(
                             text = { Text(stringResource(R.string.export_srt)) },
                             onClick = {
@@ -503,25 +672,17 @@ fun HistoryDetailScreen(
                     HorizontalDivider()
                 }
 
-                OutlinedTextField(
-                    value = detailQuery,
-                    onValueChange = viewModel::setDetailQuery,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 16.dp, vertical = 8.dp),
-                    singleLine = true,
-                    label = { Text(stringResource(R.string.detail_search_hint)) },
-                    leadingIcon = {
-                        Icon(Icons.Default.Search, contentDescription = null)
-                    },
-                    trailingIcon = {
-                        if (detailQuery.isNotEmpty()) {
-                            IconButton(onClick = { viewModel.setDetailQuery("") }) {
-                                Icon(Icons.Default.Clear, contentDescription = "Clear")
-                            }
-                        }
-                    }
-                )
+                if (canPlay && playbackPanelOpen) {
+                    PlaybackBar(
+                        playing = playback.playing,
+                        positionMs = playback.positionMs,
+                        durationMs = playback.durationMs,
+                        onToggle = viewModel::togglePlayPause,
+                        onSeek = viewModel::seekTo,
+                        compact = true
+                    )
+                    HorizontalDivider()
+                }
 
                 LazyColumn(
                     state = listState,
@@ -543,12 +704,6 @@ fun HistoryDetailScreen(
                                         " · ${FileSizeLabel(d.session.audioPath)}",
                                     style = MaterialTheme.typography.labelMedium,
                                     color = MaterialTheme.colorScheme.primary
-                                )
-                            }
-                            if (playback.hasTimeline) {
-                                Text(
-                                    stringResource(R.string.history_tap_segment_hint),
-                                    style = MaterialTheme.typography.labelSmall
                                 )
                             }
                             if (detailQuery.isNotBlank()) {
@@ -578,15 +733,23 @@ fun HistoryDetailScreen(
                     } else {
                         items(filtered, key = { it.id }) { seg ->
                             val active = playback.activeSegmentId == seg.id
-                            Column(
+                            val canSeek = playback.hasTimeline && playback.prepared
+                            Row(
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .then(
-                                        if (playback.hasTimeline && playback.prepared) {
-                                            Modifier.clickable { viewModel.seekToSegment(seg) }
-                                        } else {
-                                            Modifier
-                                        }
+                                    .combinedClickable(
+                                        onClick = {
+                                            val text = formatSegmentClipboard(seg)
+                                            if (text.isNotBlank()) {
+                                                clipboard.setText(AnnotatedString(text))
+                                                android.widget.Toast.makeText(
+                                                    context,
+                                                    context.getString(R.string.history_segment_copied),
+                                                    android.widget.Toast.LENGTH_SHORT
+                                                ).show()
+                                            }
+                                        },
+                                        onLongClick = { editingSegment = seg }
                                     )
                                     .background(
                                         if (active) {
@@ -595,20 +758,37 @@ fun HistoryDetailScreen(
                                             MaterialTheme.colorScheme.surface
                                         }
                                     )
-                                    .padding(vertical = 12.dp)
+                                    .padding(vertical = 8.dp),
+                                verticalAlignment = Alignment.CenterVertically
                             ) {
-                                Text(
-                                    "[${HistoryExport.formatOffset(seg.offsetMs)}]  " +
-                                        wallFmt.format(Date(seg.createdAt)),
-                                    style = MaterialTheme.typography.labelSmall,
-                                    fontWeight = if (active) FontWeight.Bold else FontWeight.Normal
-                                )
-                                Text("${stringResource(R.string.label_source)}: ${seg.source}")
-                                Text(
-                                    "${stringResource(R.string.label_translation)}: ${seg.translation}"
-                                )
-                                if (seg.incomplete) {
-                                    Text(stringResource(R.string.segment_incomplete))
+                                Column(
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .padding(vertical = 4.dp)
+                                ) {
+                                    Text(
+                                        "[${HistoryExport.formatOffset(seg.offsetMs)}]  " +
+                                            wallFmt.format(Date(seg.createdAt)),
+                                        style = MaterialTheme.typography.labelSmall,
+                                        fontWeight = if (active) FontWeight.Bold else FontWeight.Normal
+                                    )
+                                    Text("${stringResource(R.string.label_source)}: ${seg.source}")
+                                    Text(
+                                        "${stringResource(R.string.label_translation)}: ${seg.translation}"
+                                    )
+                                    if (seg.incomplete) {
+                                        Text(stringResource(R.string.segment_incomplete))
+                                    }
+                                }
+                                if (canSeek) {
+                                    IconButton(onClick = { viewModel.seekToSegment(seg) }) {
+                                        Icon(
+                                            Icons.Default.PlayArrow,
+                                            contentDescription = stringResource(
+                                                R.string.history_seek_segment
+                                            )
+                                        )
+                                    }
                                 }
                             }
                             HorizontalDivider()
@@ -616,18 +796,126 @@ fun HistoryDetailScreen(
                     }
                 }
 
-                if (playback.hasTimeline && playback.prepared) {
-                    PlaybackBar(
-                        playing = playback.playing,
-                        positionMs = playback.positionMs,
-                        durationMs = playback.durationMs,
-                        onToggle = viewModel::togglePlayPause,
-                        onSeek = viewModel::seekTo
-                    )
-                }
             }
         }
     }
+}
+
+/** Clipboard body: translation then source (blank lines omitted). */
+private fun formatSegmentClipboard(seg: SegmentEntity): String {
+    val zh = seg.translation.trim()
+    val en = seg.source.trim()
+    return when {
+        zh.isNotEmpty() && en.isNotEmpty() -> "$zh\n$en"
+        zh.isNotEmpty() -> zh
+        else -> en
+    }
+}
+
+@Composable
+private fun SegmentEditDialog(
+    segment: SegmentEntity,
+    onDismiss: () -> Unit,
+    onSave: (source: String, translation: String) -> Unit
+) {
+    var source by remember(segment.id) { mutableStateOf(segment.source) }
+    var translation by remember(segment.id) { mutableStateOf(segment.translation) }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(stringResource(R.string.history_edit_segment_title)) },
+        text = {
+            Column {
+                OutlinedTextField(
+                    value = source,
+                    onValueChange = { source = it },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(bottom = 8.dp),
+                    label = { Text(stringResource(R.string.label_source)) },
+                    minLines = 2,
+                    maxLines = 6
+                )
+                OutlinedTextField(
+                    value = translation,
+                    onValueChange = { translation = it },
+                    modifier = Modifier.fillMaxWidth(),
+                    label = { Text(stringResource(R.string.label_translation)) },
+                    minLines = 2,
+                    maxLines = 6
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = { onSave(source, translation) }) {
+                Text(stringResource(R.string.history_edit_save))
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text(stringResource(R.string.cancel))
+            }
+        }
+    )
+}
+
+@Composable
+private fun TitleEditDialog(
+    initial: String,
+    onDismiss: () -> Unit,
+    onSave: (String) -> Unit
+) {
+    var title by remember(initial) { mutableStateOf(initial) }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(stringResource(R.string.history_edit_title_dialog)) },
+        text = {
+            OutlinedTextField(
+                value = title,
+                onValueChange = { title = it },
+                modifier = Modifier.fillMaxWidth(),
+                singleLine = true,
+                label = { Text(stringResource(R.string.history_edit_title_dialog)) }
+            )
+        },
+        confirmButton = {
+            TextButton(
+                onClick = { onSave(title) },
+                enabled = title.trim().isNotEmpty()
+            ) {
+                Text(stringResource(R.string.history_edit_save))
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text(stringResource(R.string.cancel))
+            }
+        }
+    )
+}
+
+@Composable
+private fun TopBarSearchField(
+    value: String,
+    onValueChange: (String) -> Unit,
+    placeholder: String,
+    focusRequester: FocusRequester
+) {
+    TextField(
+        value = value,
+        onValueChange = onValueChange,
+        modifier = Modifier
+            .fillMaxWidth()
+            .focusRequester(focusRequester),
+        singleLine = true,
+        placeholder = { Text(placeholder) },
+        colors = TextFieldDefaults.colors(
+            focusedContainerColor = Color.Transparent,
+            unfocusedContainerColor = Color.Transparent,
+            disabledContainerColor = Color.Transparent,
+            focusedIndicatorColor = Color.Transparent,
+            unfocusedIndicatorColor = Color.Transparent
+        )
+    )
 }
 
 @Composable
@@ -636,7 +924,8 @@ private fun PlaybackBar(
     positionMs: Int,
     durationMs: Int,
     onToggle: () -> Unit,
-    onSeek: (Int) -> Unit
+    onSeek: (Int) -> Unit,
+    compact: Boolean = false
 ) {
     val dur = durationMs.coerceAtLeast(0)
     val pos = positionMs.coerceIn(0, if (dur > 0) dur else positionMs)
@@ -644,7 +933,10 @@ private fun PlaybackBar(
         Modifier
             .fillMaxWidth()
             .background(MaterialTheme.colorScheme.surfaceVariant)
-            .padding(horizontal = 12.dp, vertical = 8.dp)
+            .padding(
+                horizontal = 12.dp,
+                vertical = if (compact) 4.dp else 8.dp
+            )
     ) {
         Slider(
             value = if (dur > 0) pos.toFloat() else 0f,
@@ -656,13 +948,14 @@ private fun PlaybackBar(
             verticalAlignment = Alignment.CenterVertically,
             modifier = Modifier.fillMaxWidth()
         ) {
-            Button(onClick = onToggle) {
-                Text(
-                    if (playing) stringResource(R.string.playback_pause)
-                    else stringResource(R.string.playback_play)
+            IconButton(onClick = onToggle) {
+                Icon(
+                    if (playing) Icons.Default.Pause else Icons.Default.PlayArrow,
+                    contentDescription = stringResource(
+                        if (playing) R.string.playback_pause else R.string.playback_play
+                    )
                 )
             }
-            Spacer(Modifier.width(12.dp))
             Text(
                 "${formatPlaybackTime(pos)} / ${formatPlaybackTime(dur)}",
                 style = MaterialTheme.typography.labelMedium

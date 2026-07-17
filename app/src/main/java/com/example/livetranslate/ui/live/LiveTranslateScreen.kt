@@ -60,6 +60,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
@@ -866,12 +867,16 @@ private fun BilingualPairList(
                 showTranslation = effectiveShowZh,
                 incomplete = seg.incomplete,
                 fontSp = fontSp,
-                layout = settings.overlayLayoutModeEnum()
+                layout = settings.overlayLayoutModeEnum(),
+                marqueeSpeedPxS = settings.overlayMarqueeSpeed
             )
         }
         val pEn = partialEn.trim()
         val pZh = partialZh.trim()
-        if (pEn.isNotEmpty() || pZh.isNotEmpty()) {
+        // ScrollLine: hide streaming partials on home list too (same as overlay) — avoids jump.
+        val showPartial = settings.overlayLayoutModeEnum() != OverlayLayoutMode.ScrollLine &&
+            (pEn.isNotEmpty() || pZh.isNotEmpty())
+        if (showPartial) {
             item(key = "partial") {
                 BilingualPairItem(
                     source = pEn,
@@ -880,7 +885,8 @@ private fun BilingualPairList(
                     showTranslation = effectiveShowZh,
                     incomplete = true,
                     fontSp = fontSp,
-                    layout = settings.overlayLayoutModeEnum()
+                    layout = settings.overlayLayoutModeEnum(),
+                    marqueeSpeedPxS = settings.overlayMarqueeSpeed
                 )
             }
         }
@@ -909,7 +915,8 @@ private fun BilingualPairItem(
     showTranslation: Boolean,
     incomplete: Boolean,
     fontSp: androidx.compose.ui.unit.TextUnit,
-    layout: OverlayLayoutMode
+    layout: OverlayLayoutMode,
+    marqueeSpeedPxS: Int = UserSettings.DEFAULT_OVERLAY_MARQUEE_SPEED
 ) {
     Column(
         modifier = Modifier
@@ -923,7 +930,8 @@ private fun BilingualPairItem(
                 fontSp = fontSp,
                 layout = layout,
                 color = MaterialTheme.colorScheme.onSurface,
-                fontWeight = FontWeight.Normal
+                fontWeight = FontWeight.Normal,
+                marqueeSpeedPxS = marqueeSpeedPxS
             )
         }
         if (showTranslation && translation.isNotBlank()) {
@@ -935,7 +943,8 @@ private fun BilingualPairItem(
                 fontSp = fontSp,
                 layout = layout,
                 color = MaterialTheme.colorScheme.primary,
-                fontWeight = FontWeight.Medium
+                fontWeight = FontWeight.Medium,
+                marqueeSpeedPxS = marqueeSpeedPxS
             )
         }
         if (incomplete && translation.isBlank() && showTranslation) {
@@ -958,7 +967,8 @@ private fun CaptionLine(
     fontSp: androidx.compose.ui.unit.TextUnit,
     layout: OverlayLayoutMode,
     color: androidx.compose.ui.graphics.Color,
-    fontWeight: FontWeight
+    fontWeight: FontWeight,
+    marqueeSpeedPxS: Int = UserSettings.DEFAULT_OVERLAY_MARQUEE_SPEED
 ) {
     when (layout) {
         OverlayLayoutMode.FullSentence -> {
@@ -973,11 +983,17 @@ private fun CaptionLine(
             )
         }
         OverlayLayoutMode.ScrollLine -> {
+            val density = LocalDensity.current.density
+            // Map px/s setting → Compose marquee velocity in dp per second
+            val velocityDp = (marqueeSpeedPxS / density).coerceIn(20f, 160f).dp
             Text(
                 text = text,
                 modifier = Modifier
                     .fillMaxWidth()
-                    .basicMarquee(iterations = Int.MAX_VALUE),
+                    .basicMarquee(
+                        iterations = Int.MAX_VALUE,
+                        velocity = velocityDp
+                    ),
                 textAlign = TextAlign.Center,
                 fontSize = fontSp,
                 color = color,

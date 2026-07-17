@@ -10,7 +10,6 @@ import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import com.example.livetranslate.data.llm.LlmReasoningEffort
-import com.example.livetranslate.data.llm.LlmReasoningEffortStyle
 import com.example.livetranslate.data.llm.LlmThinkingMode
 import com.example.livetranslate.util.AppLocale
 import kotlinx.coroutines.flow.Flow
@@ -34,7 +33,6 @@ class SettingsRepository(private val context: Context) {
         val llmFullUrl = booleanPreferencesKey("llm_full_url")
         val llmThinking = stringPreferencesKey("llm_thinking")
         val llmReasoningEffort = stringPreferencesKey("llm_reasoning_effort")
-        val llmReasoningEffortStyle = stringPreferencesKey("llm_reasoning_effort_style")
         val llmSystemPrompt = stringPreferencesKey("llm_system_prompt")
         val llmUserPrompt = stringPreferencesKey("llm_user_prompt")
         val llmTitleSystemPrompt = stringPreferencesKey("llm_title_system_prompt")
@@ -65,6 +63,13 @@ class SettingsRepository(private val context: Context) {
         val overlayTextMode = stringPreferencesKey("overlay_text_mode")
         val overlayLayoutMode = stringPreferencesKey("overlay_layout_mode")
         val overlayFontSizeSp = intPreferencesKey("overlay_font_size_sp")
+        val overlayPadHDp = intPreferencesKey("overlay_pad_h_dp")
+        val overlayPadVDp = intPreferencesKey("overlay_pad_v_dp")
+        val overlayMarqueeSpeed = intPreferencesKey("overlay_marquee_speed")
+        val overlayMarqueeFinishBeforeNext =
+            booleanPreferencesKey("overlay_marquee_finish_before_next")
+        val overlayShowBorder = booleanPreferencesKey("overlay_show_border")
+        val overlayShowDivider = booleanPreferencesKey("overlay_show_divider")
         val liveFontSizeSp = intPreferencesKey("live_font_size_sp")
     }
 
@@ -93,7 +98,6 @@ class SettingsRepository(private val context: Context) {
             llmFullUrl = p[Keys.llmFullUrl] ?: d.llmFullUrl,
             llmThinking = p[Keys.llmThinking] ?: d.llmThinking,
             llmReasoningEffort = p[Keys.llmReasoningEffort] ?: d.llmReasoningEffort,
-            llmReasoningEffortStyle = p[Keys.llmReasoningEffortStyle] ?: d.llmReasoningEffortStyle,
             llmSystemPrompt = p[Keys.llmSystemPrompt] ?: d.llmSystemPrompt,
             llmUserPrompt = p[Keys.llmUserPrompt] ?: d.llmUserPrompt,
             llmTitleSystemPrompt = p[Keys.llmTitleSystemPrompt] ?: d.llmTitleSystemPrompt,
@@ -125,6 +129,13 @@ class SettingsRepository(private val context: Context) {
             overlayTextMode = p[Keys.overlayTextMode] ?: d.overlayTextMode,
             overlayLayoutMode = p[Keys.overlayLayoutMode] ?: d.overlayLayoutMode,
             overlayFontSizeSp = p[Keys.overlayFontSizeSp] ?: d.overlayFontSizeSp,
+            overlayPadHDp = p[Keys.overlayPadHDp] ?: d.overlayPadHDp,
+            overlayPadVDp = p[Keys.overlayPadVDp] ?: d.overlayPadVDp,
+            overlayMarqueeSpeed = p[Keys.overlayMarqueeSpeed] ?: d.overlayMarqueeSpeed,
+            overlayMarqueeFinishBeforeNext = p[Keys.overlayMarqueeFinishBeforeNext]
+                ?: d.overlayMarqueeFinishBeforeNext,
+            overlayShowBorder = p[Keys.overlayShowBorder] ?: d.overlayShowBorder,
+            overlayShowDivider = p[Keys.overlayShowDivider] ?: d.overlayShowDivider,
             liveFontSizeSp = p[Keys.liveFontSizeSp] ?: d.liveFontSizeSp
         )
     }
@@ -144,8 +155,6 @@ class SettingsRepository(private val context: Context) {
         prefs[Keys.llmThinking] = LlmThinkingMode.fromStorage(next.llmThinking).name
         prefs[Keys.llmReasoningEffort] =
             LlmReasoningEffort.fromStorage(next.llmReasoningEffort).name
-        prefs[Keys.llmReasoningEffortStyle] =
-            LlmReasoningEffortStyle.fromStorage(next.llmReasoningEffortStyle).name
         prefs[Keys.llmSystemPrompt] = next.llmSystemPrompt.ifBlank {
             UserSettings.DEFAULT_LLM_SYSTEM_PROMPT
         }
@@ -184,6 +193,12 @@ class SettingsRepository(private val context: Context) {
         prefs[Keys.overlayTextMode] = OverlayTextMode.fromStorage(next.overlayTextMode).name
         prefs[Keys.overlayLayoutMode] = OverlayLayoutMode.fromStorage(next.overlayLayoutMode).name
         prefs[Keys.overlayFontSizeSp] = next.overlayFontSizeSp
+        prefs[Keys.overlayPadHDp] = next.overlayPadHDp
+        prefs[Keys.overlayPadVDp] = next.overlayPadVDp
+        prefs[Keys.overlayMarqueeSpeed] = next.overlayMarqueeSpeed
+        prefs[Keys.overlayMarqueeFinishBeforeNext] = next.overlayMarqueeFinishBeforeNext
+        prefs[Keys.overlayShowBorder] = next.overlayShowBorder
+        prefs[Keys.overlayShowDivider] = next.overlayShowDivider
         prefs[Keys.liveFontSizeSp] = next.liveFontSizeSp
     }
 }

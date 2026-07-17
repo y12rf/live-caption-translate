@@ -10,16 +10,19 @@ import com.konovalov.vad.silero.config.SampleRate
 /**
  * Silero DNN speech classifier (gkonovalov/android-vad).
  *
- * Frame size is fixed at 512 samples @ 16 kHz (~32 ms).
- * Hangover silence is **not** applied here ([silenceDurationMs]=0) so [EnergyVad]
- * owns end-of-utterance timing via [UserSettings.silenceMs].
- * A short [speechDurationMs] filters single-frame false starts.
+ * Library owns hangover timing:
+ * - [speechDurationMs] — min speech run before isSpeech stays true (anti-blip)
+ * - [silenceDurationMs] — min silence after speech before isSpeech goes false
+ *   (end-of-utterance hangover; settings [UserSettings.silenceMs], default 300)
+ *
+ * Frame size fixed at 512 samples @ 16 kHz (~32 ms).
+ * [EnergyVad] only edge-detects speech→silence and enforces max/min utterance length.
  */
 class SileroSpeechClassifier(
     context: Context,
     mode: SileroVadMode = SileroVadMode.NORMAL,
     speechDurationMs: Int = DEFAULT_SPEECH_DURATION_MS,
-    silenceDurationMs: Int = 0
+    silenceDurationMs: Int = DEFAULT_SILENCE_DURATION_MS
 ) : SpeechClassifier {
 
     private val vad = VadSilero(
@@ -52,8 +55,11 @@ class SileroSpeechClassifier(
         /** ~32 ms @ 16 kHz. */
         const val FRAME_MS: Int = FRAME_SAMPLES * 1000 / 16_000
 
-        /** Minimum speech run before isSpeech stays true (anti-blip). */
+        /** Library recommended Speech Duration (anti single-frame false start). */
         const val DEFAULT_SPEECH_DURATION_MS = 50
+
+        /** Library recommended Silence Duration (end-of-utterance hangover). */
+        const val DEFAULT_SILENCE_DURATION_MS = 300
     }
 }
 

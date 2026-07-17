@@ -92,6 +92,26 @@ interface SessionDao {
     @Query("DELETE FROM sessions")
     suspend fun deleteAllSessions()
 
+    @Query("SELECT * FROM segments WHERE id = :id LIMIT 1")
+    suspend fun getSegment(id: Long): SegmentEntity?
+
+    @Query(
+        """
+        UPDATE segments
+        SET source = :source, translation = :translation, incomplete = :incomplete
+        WHERE id = :id
+        """
+    )
+    suspend fun updateSegmentText(
+        id: Long,
+        source: String,
+        translation: String,
+        incomplete: Boolean
+    ): Int
+
+    @Query("UPDATE sessions SET previewZh = :title WHERE id = :id")
+    suspend fun updateSessionTitle(id: Long, title: String): Int
+
     /**
      * Search sessions by title or any segment EN/ZH text.
      * [pattern] should already include SQL wildcards, e.g. `%foo%`.

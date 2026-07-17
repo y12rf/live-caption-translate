@@ -65,13 +65,14 @@ service/     RecordingService · SubtitleOverlayService
 
 ## 默认 VAD（可在设置中改）
 
-| 参数 | 默认 |
-|------|------|
-| `silenceMs` | 500 |
-| `maxUtteranceMs` | 4500 |
-| `minUtteranceMs` | 1700 |
-| `sileroVadMode` | NORMAL |
-| 帧长 | 512 samples @ 16 kHz（~32 ms，Silero 固定） |
+| 参数 | 默认 | 归属 |
+|------|------|------|
+| `silenceMs` | 300 | Silero `silenceDuration`（末段挂起） |
+| `maxUtteranceMs` | 4500 | 应用层强制截断 |
+| `minUtteranceMs` | 1700 | 应用层：静音切过短则**并入下一句**（Stop/最长仍刷出） |
+| `sileroVadMode` | NORMAL | Silero Mode |
+| 帧长 | 512 @ 16 kHz | Silero 固定（~32 ms） |
+| speechDuration | 50 ms | Silero 推荐，写死防毛刺 |
 
 ## 权限
 

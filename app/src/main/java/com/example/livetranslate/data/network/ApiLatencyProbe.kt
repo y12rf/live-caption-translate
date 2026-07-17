@@ -133,8 +133,7 @@ class ApiLatencyProbe(
             LlmThinkingBody.appendAfterMessages(
                 this,
                 mode = settings.llmThinkingMode(),
-                effort = settings.llmReasoningEffortEnum(),
-                style = settings.llmReasoningEffortStyleEnum()
+                effort = settings.llmReasoningEffortEnum()
             )
             append('}')
         }

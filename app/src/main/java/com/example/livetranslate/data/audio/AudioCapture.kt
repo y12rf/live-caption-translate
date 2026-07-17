@@ -526,14 +526,16 @@ class AudioCapture(
 
     private fun createVad(): EnergyVad {
         val s = settings()
+        // Silence hangover lives in Silero (silenceDurationMs); EnergyVad only edge-cuts.
         return EnergyVad(
             sampleRate = ASR_SAMPLE_RATE,
             frameSamples = VAD_FRAME_SAMPLES,
             classifier = SileroSpeechClassifier(
                 context = appContext,
-                mode = SileroVadMode.fromStorage(s.sileroVadMode)
+                mode = SileroVadMode.fromStorage(s.sileroVadMode),
+                silenceDurationMs = s.silenceMs
             ),
-            silenceMs = s.silenceMs,
+            postSpeechQuietMs = 0,
             maxUtteranceMs = s.maxUtteranceMs,
             minUtteranceMs = s.minUtteranceMs
         )

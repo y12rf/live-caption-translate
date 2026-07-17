@@ -66,6 +66,15 @@ object SettingsValidation {
         if (s.overlayFontSizeSp < 10 || s.overlayFontSizeSp > 48) {
             w += "Overlay font size sp should be 10–48"
         }
+        if (s.overlayPadHDp < 0 || s.overlayPadHDp > 32) {
+            w += "Overlay horizontal padding dp should be 0–32"
+        }
+        if (s.overlayPadVDp < 0 || s.overlayPadVDp > 24) {
+            w += "Overlay vertical padding dp should be 0–24"
+        }
+        if (s.overlayMarqueeSpeed < 20 || s.overlayMarqueeSpeed > 160) {
+            w += "Marquee speed px/s should be 20–160"
+        }
         if (s.liveFontSizeSp < 10 || s.liveFontSizeSp > 48) {
             w += "Live font size sp should be 10–48"
         }
@@ -107,6 +116,9 @@ object SettingsValidation {
             overlayMaxHeightDp = s.overlayMaxHeightDp.coerceIn(60, 800),
             overlayAlphaPercent = s.overlayAlphaPercent.coerceIn(0, 100),
             overlayFontSizeSp = s.overlayFontSizeSp.coerceIn(10, 48),
+            overlayPadHDp = s.overlayPadHDp.coerceIn(0, 32),
+            overlayPadVDp = s.overlayPadVDp.coerceIn(0, 24),
+            overlayMarqueeSpeed = s.overlayMarqueeSpeed.coerceIn(20, 160),
             liveFontSizeSp = s.liveFontSizeSp.coerceIn(10, 48),
             overlayTextMode = OverlayTextMode.fromStorage(s.overlayTextMode).name,
             overlayLayoutMode = OverlayLayoutMode.fromStorage(s.overlayLayoutMode).name,

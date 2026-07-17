@@ -75,7 +75,15 @@
     <string name="history_delete_confirm_title">Delete this session?</string>
     <string name="history_delete_confirm_body">Transcript will be deleted. The audio file is removed only if no other session shares it. This cannot be undone.</string>
     <string name="history_deleted">Deleted</string>
-    <string name="history_tap_segment_hint">Tap a sentence to jump in the recording</string>
+    <string name="history_tap_segment_hint">Tap to copy · long-press to edit · ▶ seeks audio</string>
+    <string name="history_segment_copied">Segment copied</string>
+    <string name="history_edit_segment_title">Edit segment</string>
+    <string name="history_edit_title_dialog">Edit title</string>
+    <string name="history_edit_save">Save</string>
+    <string name="history_seek_segment">Seek to this sentence</string>
+    <string name="history_search_action">Search</string>
+    <string name="history_playback_expand">Show seek bar</string>
+    <string name="history_playback_hide">Hide seek bar</string>
     <string name="label_source">EN</string>
     <string name="label_translation">ZH</string>
     <string name="segment_incomplete">(incomplete)</string>
@@ -243,7 +251,7 @@
     <string name="settings_reset_keeps_key_hint">API key is kept; only connection / model options are restored.</string>
     <string name="settings_input_lang">Input language</string>
     <string name="settings_output_lang">Output language</string>
-    <string name="settings_silence_ms">Silence ms</string>
+    <string name="settings_silence_ms">Silero silence duration (ms)</string>
     <string name="settings_max_utt_ms">Max utterance ms</string>
     <string name="settings_min_utt_ms">Min utterance ms</string>
     <string name="settings_energy">Energy threshold</string>
@@ -262,6 +270,14 @@
     <string name="settings_overlay_layout">Caption layout</string>
     <string name="settings_overlay_layout_info">• FullSentence — full sentence, centered\n• ScrollLine — single-line horizontal marquee</string>
     <string name="settings_overlay_font_sp">Overlay font size (sp)</string>
+    <string name="settings_overlay_pad_h">Text ↔ side padding (dp)</string>
+    <string name="settings_overlay_pad_v">Text ↔ divider padding (dp)</string>
+    <string name="settings_info_overlay_pad">Horizontal / vertical padding of caption text inside the floating panel (dp). Smaller values hug the border and divider more tightly. Range: H 0–32, V 0–24. Defaults: 6 / 4.</string>
+    <string name="settings_overlay_marquee_speed">Scroll speed (px/s)</string>
+    <string name="settings_overlay_marquee_finish">Finish scroll before next line</string>
+    <string name="settings_overlay_show_border">Show panel border</string>
+    <string name="settings_overlay_show_divider">Show EN/ZH divider</string>
+    <string name="settings_info_overlay_marquee">ScrollLine only:\n• Speed — pixels per second (20–160, default 60)\n• Finish before next — wait until the current line finishes scrolling before showing the next committed sentence (avoids mid-scroll jumps). Streaming partials are not shown in ScrollLine.</string>
     <string name="settings_live_font_sp">Home panel font size (sp)</string>
     <string name="settings_overlay_order_title">Caption order</string>
     <string name="settings_overlay_order_info">On (default): translation on top, source below.\nOff: source on top, translation below.</string>
@@ -273,8 +289,8 @@
     <string name="settings_testing_llm">Testing LLM…</string>
     <string name="settings_info">Info</string>
     <string name="settings_expand">Expand</string>
-    <string name="settings_info_asr_section">Speech recognition endpoint. Used for live mic/internal/file and for history reprocess.</string>
-    <string name="settings_info_llm_section">Translation endpoint. Skipped entirely when ASR-only mode is on.</string>
+    <string name="settings_info_asr_section">Speech recognition for live mic / internal audio / file import and history reprocess.\n\n• API URL — default path after /v1/; “Full URL” uses the field as-is\n• OpenAiTranscriptions = multipart WAV; ChatCompletionsAudio = chat + base64 audio\n• Bearer vs ApiKeyHeader — header style for your gateway\n• Model — request body model id (e.g. whisper-1)</string>
+    <string name="settings_info_llm_section">Translation chat-completions endpoint. Skipped when ASR-only is on.\n\n• API URL / Full URL — same path rules as ASR\n• Auth: Bearer (DeepSeek/OpenAI) or ApiKeyHeader\n• Thinking — Default omits field; Enabled adds thinking + reasoning_effort (low…max); Disabled sends type disabled\n• Model — e.g. gpt-4o-mini</string>
     <string name="settings_info_asr_url">Default: if a path already exists after /v1/, use as-is; otherwise append:\n• OpenAiTranscriptions → /v1/audio/transcriptions\n• ChatCompletionsAudio → /v1/chat/completions\n\nWith “Full URL” on: no path is appended.</string>
     <string name="settings_info_llm_url">Default: if a path already exists after /v1/, use as-is; otherwise append /v1/chat/completions.\n\nWith “Full URL” on: request exactly the URL you typed.</string>
     <string name="settings_info_full_url">When on, the API URL is used exactly as typed (no /v1/… append).</string>
@@ -283,26 +299,25 @@
     <string name="settings_info_asr_style">• OpenAiTranscriptions — multipart WAV (classic Whisper)\n• ChatCompletionsAudio — chat + base64 input_audio (e.g. MIMO)\n\nAffects request body only, not URL resolution.</string>
     <string name="settings_info_asr_auth">• Bearer — Authorization: Bearer &lt;key&gt;\n• ApiKeyHeader — api-key: &lt;key&gt; (e.g. Xiaomi MIMO)</string>
     <string name="settings_info_llm_auth">Having an API key ≠ ApiKeyHeader.\n\n• Bearer (DeepSeek / OpenAI, etc.) — Authorization: Bearer &lt;key&gt;\n• ApiKeyHeader — header name is api-key\n\nUse Bearer for DeepSeek.</string>
-    <string name="settings_info_thinking">Thinking switch (after messages):\n• Enabled — \"thinking\":{\"type\":\"enabled\"} + effort field\n• Disabled — \"thinking\":{\"type\":\"disabled\"}\n\nDefault is Enabled.\nResponse thinking / reasoning_content is ignored; only delta.content is used; &lt;think&gt; tags are stripped.</string>
-    <string name="settings_info_reasoning_effort">When thinking is Enabled, send effort:\n• High — ordinary translate (default)\n• Max — harder tasks\n\nCompat: low/medium → high, xhigh → max.\nOpenAI body: \"reasoning_effort\":\"high|max\"\nAnthropic body: \"output_config\":{\"effort\":\"high|max\"}</string>
-    <string name="settings_info_reasoning_effort_style">Where to put effort when thinking is Enabled:\n• OpenAi — top-level reasoning_effort (DeepSeek / OpenAI-compat)\n• Anthropic — output_config.effort</string>
+    <string name="settings_info_thinking">Thinking field after messages (OpenAI-compat):\n• Default — omit thinking / reasoning_effort (vanilla request)\n• Enabled — \"thinking\":{\"type\":\"enabled\"} + reasoning_effort\n• Disabled — \"thinking\":{\"type\":\"disabled\"}\n\nResponse thinking / reasoning_content is ignored; only delta.content is used; &lt;think&gt; tags are stripped.</string>
+    <string name="settings_info_reasoning_effort">When thinking is Enabled, send OpenAI \"reasoning_effort\":\nlow | medium | high | max (default low).</string>
     <string name="settings_info_system_prompt">System message for live / offline translation.\n\nPlaceholders:\n• {{from}} — input language\n• {{to}} — output language\n• {{glossary}} — glossary lines (empty if none)\n\nDefault: translation-only, skip fillers, light ASR repair, glossary first.</string>
     <string name="settings_info_user_prompt">User message for each translation request.\n\nPlaceholders:\n• {{from}} / {{to}} — languages\n• {{history}} — previous turns for context\n• {{text}} — current source utterance (required)\n\nMust include {{text}} so the model receives the sentence to translate.</string>
     <string name="settings_info_title_system_prompt">System message when generating a session title after enough turns.</string>
     <string name="settings_info_title_user_prompt">User message for session title generation.\n\nPlaceholder:\n• {{dialogue}} — numbered source → translation sample turns</string>
     <string name="settings_prompt_section">LLM prompts</string>
-    <string name="settings_prompt_section_info">All chat prompts used by the app (translation system/user + session title). Edit freely; blank fields fall back to built-in English defaults on save.</string>
+    <string name="settings_prompt_section_info">All chat prompts (translation system/user + session title). Blank fields fall back to built-in English defaults on save.\n\nPlaceholders:\n• System: {{from}} {{to}} {{glossary}}\n• User translate: {{from}} {{to}} {{history}} {{text}} ({{text}} required)\n• Title user: {{dialogue}}</string>
     <string name="settings_info_languages">Languages sent to ASR / LLM (not the app UI language).\nUse short codes such as en, zh, ja, or names your API accepts.</string>
     <string name="settings_info_input_lang">Source language for ASR and LLM (e.g. en).</string>
     <string name="settings_info_output_lang">Target language for translation (e.g. zh). Ignored in ASR-only mode.</string>
-    <string name="settings_info_vad">Silero DNN VAD + utterance rules:\n• Silence ms — end-of-utterance silence\n• Max utterance ms — force cut length\n• Min utterance ms — drop short clips\n• Silero mode — model confidence (NORMAL / AGGRESSIVE / VERY_AGGRESSIVE)\n• Context window N — LLM history turns</string>
-    <string name="settings_info_silence_ms">How long continuous silence ends an utterance (ms). Typical 300–800.</string>
-    <string name="settings_info_max_utt_ms">Force-cut length if speech never pauses (ms). Lower = faster latency, more cuts.</string>
-    <string name="settings_info_min_utt_ms">Drop clips shorter than this (ms) to reduce noise false triggers.</string>
+    <string name="settings_info_vad">Silero DNN VAD (library hangover) + packer:\n• Silence ms — Silero silenceDuration (default 300; hangover after last speech)\n• Max utterance ms — force cut if no pause\n• Min utterance ms — silence cuts shorter than this merge into the next speech (not dropped)\n• Silero mode — NORMAL / AGGRESSIVE / VERY_AGGRESSIVE\n• Context window N — LLM history turns</string>
+    <string name="settings_info_silence_ms">Silero library Silence Duration (ms): how long isSpeech stays true after speech ends before the packer cuts. Default 300 (android-vad recommendation).</string>
+    <string name="settings_info_max_utt_ms">Force-cut length if speech never pauses (ms). Lower = faster latency, more cuts. App-layer (not Silero). Always flushes even if under min.</string>
+    <string name="settings_info_min_utt_ms">If a silence cut’s voiced length is shorter than this (ms), PCM is held and merged into the next speech run (not discarded). Stop/max still flush. 0 = no minimum.</string>
     <string name="settings_info_energy">RMS energy gate for speech vs silence. Raise in noisy rooms; lower if soft speech is missed.</string>
     <string name="settings_info_silero_mode">Silero score threshold mode:\n• NORMAL — balanced (default)\n• AGGRESSIVE — fewer false speech hits\n• VERY_AGGRESSIVE — strictest; may miss soft speech\n\nFrame size is fixed at 512 samples @ 16 kHz (~32 ms).</string>
     <string name="settings_info_context_n">How many previous EN/ZH pairs are sent as LLM context for terminology consistency.</string>
-    <string name="settings_info_overlay">Floating caption over other apps:\n• Content mode / layout / font size\n• Size, colors, opacity\n• Stack order (translation vs source on top)\n\nLock/unlock from the recording notification; unlocked = drag, locked = touch-through.</string>
+    <string name="settings_info_overlay">Floating caption over other apps:\n• Content mode / layout / font size\n• Text padding (sides &amp; vs divider)\n• Border / divider on-off\n• Size, colors, opacity\n• Stack order (translation vs source on top)\n\nLock/unlock from the recording notification; unlocked = drag, locked = touch-through.</string>
     <string name="settings_info_overlay_font">Floating overlay text size in sp (10–48).</string>
     <string name="settings_info_live_font">Home bilingual list text size in sp (10–48).</string>
     <string name="settings_info_overlay_size">Max width/height in dp. Content scrolls if taller than max height.</string>

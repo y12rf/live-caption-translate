@@ -9,7 +9,6 @@ import android.graphics.PixelFormat
 import android.graphics.drawable.GradientDrawable
 import android.os.Build
 import android.os.IBinder
-import android.text.TextUtils
 import android.view.Gravity
 import android.view.MotionEvent
 import android.view.View
@@ -18,7 +17,6 @@ import android.view.WindowManager
 import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.ScrollView
-import android.widget.TextView
 import android.widget.Toast
 import com.example.livetranslate.LiveTranslateApp
 import com.example.livetranslate.R
@@ -26,6 +24,9 @@ import com.example.livetranslate.data.settings.OverlayLayoutMode
 import com.example.livetranslate.data.settings.OverlayTextMode
 import com.example.livetranslate.data.settings.UserSettings
 import com.example.livetranslate.domain.LiveSessionUiState
+import com.example.livetranslate.domain.model.SessionPhase
+import com.example.livetranslate.ui.caption.CaptionLineView
+import com.example.livetranslate.ui.caption.OverlayScrollController
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -53,12 +54,15 @@ class SubtitleOverlayService : Service() {
     private var root: FrameLayout? = null
     private var panel: LinearLayout? = null
     private var scroll: ScrollView? = null
-    private var enView: TextView? = null
-    private var zhView: TextView? = null
+    private var enView: CaptionLineView? = null
+    private var zhView: CaptionLineView? = null
     private var dividerView: View? = null
     private var layoutParams: WindowManager.LayoutParams? = null
 
     private var overlaySettings: UserSettings = UserSettings()
+    private val scrollController = OverlayScrollController { cap -> showCaption(cap) }
+    /** How many marquee lines still need to finish for the current caption. */
+    private var pendingLineFinishes = 0
 
     // Drag state (only when unlocked)
     private var downRawX = 0f
@@ -91,21 +95,21 @@ class SubtitleOverlayService : Service() {
         windowManager = getSystemService(WINDOW_SERVICE) as WindowManager
         touchSlop = ViewConfiguration.get(this).scaledTouchSlop
         val density = resources.displayMetrics.density
-        val padH = (14 * density).toInt()
-        val padV = (10 * density).toInt()
+        val padH = (UserSettings.DEFAULT_OVERLAY_PAD_H_DP * density).toInt()
+        val padV = (UserSettings.DEFAULT_OVERLAY_PAD_V_DP * density).toInt()
 
         // Both halves: full width, equal vertical weight (50/50 split by divider)
-        zhView = TextView(this).apply {
-            setTextColor(Color.parseColor("#FFEB3B"))
-            textSize = 16f
+        zhView = CaptionLineView(this).apply {
+            setTextColorInt(Color.parseColor("#FFEB3B"))
+            setTextSizeSp(16f)
             setPadding(padH, padV, padH, padV)
-            gravity = Gravity.CENTER_VERTICAL or Gravity.START
+            onScrollFinished = { onLineMarqueeFinished() }
         }
-        enView = TextView(this).apply {
-            setTextColor(Color.WHITE)
-            textSize = 16f
+        enView = CaptionLineView(this).apply {
+            setTextColorInt(Color.WHITE)
+            setTextSizeSp(16f)
             setPadding(padH, padV, padH, padV)
-            gravity = Gravity.CENTER_VERTICAL or Gravity.START
+            onScrollFinished = { onLineMarqueeFinished() }
         }
         dividerView = View(this).apply {
             setBackgroundColor(Color.argb(100, 255, 255, 255))
@@ -164,7 +168,8 @@ class SubtitleOverlayService : Service() {
         val defaultY = (dm.heightPixels * 0.72f).toInt().coerceAtLeast(0)
         val maxX = (dm.widthPixels - widthPx).coerceAtLeast(0)
         val maxY = (dm.heightPixels - heightPx).coerceAtLeast(0)
-        val saved = OverlayPositionStore.load(this)
+        // Per-resolution slot only; unknown resolution → default placement
+        val saved = OverlayPositionStore.load(this, dm)
         layoutParams = WindowManager.LayoutParams(
             widthPx,
             heightPx,
@@ -173,7 +178,6 @@ class SubtitleOverlayService : Service() {
             PixelFormat.TRANSLUCENT
         ).apply {
             gravity = Gravity.TOP or Gravity.START
-            // Restore last drag position when available; clamp to current screen/size
             x = (saved?.first ?: defaultX).coerceIn(0, maxX)
             y = (saved?.second ?: defaultY).coerceIn(0, maxY)
         }
@@ -195,6 +199,7 @@ class SubtitleOverlayService : Service() {
         settingsJob = scope.launch {
             settingsRepo.settings.collect { s ->
                 overlaySettings = s
+                scrollController.finishBeforeNext = s.overlayMarqueeFinishBeforeNext
                 applyChrome(s)
                 applyLayoutSize(s)
                 applyStackOrder(s)
@@ -203,18 +208,62 @@ class SubtitleOverlayService : Service() {
         }
 
         captionJob = scope.launch {
-            controller.state
-                .map { st -> st.toOverlayCaption(overlaySettings) }
-                .distinctUntilChanged()
-                .collect { cap ->
-                    enView?.text = cap.en
-                    zhView?.text = cap.zh
-                    // Marquee needs isSelected to keep scrolling
-                    if (overlaySettings.overlayLayoutModeEnum() == OverlayLayoutMode.ScrollLine) {
-                        enView?.isSelected = true
-                        zhView?.isSelected = true
+            controller.state.collect { st ->
+                if (st.phase == SessionPhase.Idle && st.segments.isEmpty()) {
+                    scrollController.reset()
+                    pendingLineFinishes = 0
+                }
+                when (overlaySettings.overlayLayoutModeEnum()) {
+                    OverlayLayoutMode.ScrollLine -> {
+                        // Committed segments only; queue + finish-before-next
+                        scrollController.onState(st, overlaySettings)
+                    }
+                    OverlayLayoutMode.FullSentence -> {
+                        scrollController.reset()
+                        val cap = st.toOverlayCaption(overlaySettings)
+                        showCaptionImmediate(cap)
                     }
                 }
+            }
+        }
+    }
+
+    private fun showCaption(cap: OverlayScrollController.OverlayCaption) {
+        val layout = overlaySettings.overlayLayoutModeEnum()
+        val mode = overlaySettings.overlayTextModeEnum()
+        val showEn = mode != OverlayTextMode.TranslationOnly && cap.en.isNotBlank()
+        val showZh = mode != OverlayTextMode.SourceOnly &&
+            !overlaySettings.asrOnlyMode &&
+            cap.zh.isNotBlank()
+        // Count lines that will report finish (marquee or dwell)
+        pendingLineFinishes = 0
+        if (layout == OverlayLayoutMode.ScrollLine) {
+            if (showEn) pendingLineFinishes++
+            if (showZh) pendingLineFinishes++
+            if (pendingLineFinishes == 0) {
+                // Empty caption: advance immediately
+                scrollController.onScrollFinished()
+                return
+            }
+        }
+        enView?.setCaptionText(if (showEn) cap.en else "")
+        zhView?.setCaptionText(if (showZh) cap.zh else "")
+        if (layout == OverlayLayoutMode.FullSentence) {
+            pendingLineFinishes = 0
+        }
+    }
+
+    private fun showCaptionImmediate(cap: OverlayCaption) {
+        enView?.setCaptionText(cap.en)
+        zhView?.setCaptionText(cap.zh)
+    }
+
+    private fun onLineMarqueeFinished() {
+        if (overlaySettings.overlayLayoutModeEnum() != OverlayLayoutMode.ScrollLine) return
+        if (pendingLineFinishes <= 0) return
+        pendingLineFinishes--
+        if (pendingLineFinishes <= 0) {
+            scrollController.onScrollFinished()
         }
     }
 
@@ -263,22 +312,30 @@ class SubtitleOverlayService : Service() {
             cornerRadius = CORNER_RADIUS_DP * density
             setColor(Color.argb(a, r, g, b))
         }
-        val strokeA = (a * 0.45f).toInt().coerceIn(40, 180)
-        val strokeColor = if (locked) {
-            Color.argb(strokeA, 120, 120, 120)
+        if (s.overlayShowBorder) {
+            val strokeA = (a * 0.45f).toInt().coerceIn(40, 180)
+            val strokeColor = if (locked) {
+                Color.argb(strokeA, 120, 120, 120)
+            } else {
+                Color.argb(strokeA.coerceAtLeast(100), 76, 175, 80)
+            }
+            bg.setStroke((1.5f * density).toInt().coerceAtLeast(1), strokeColor)
         } else {
-            Color.argb(strokeA.coerceAtLeast(100), 76, 175, 80)
+            bg.setStroke(0, Color.TRANSPARENT)
         }
-        bg.setStroke((1.5f * density).toInt().coerceAtLeast(1), strokeColor)
         root?.background = bg
 
         val enColor = UserSettings.parseColorHex(s.overlayEnTextColor, Color.WHITE)
         val zhColor = UserSettings.parseColorHex(s.overlayZhTextColor, Color.parseColor("#FFEB3B"))
-        enView?.setTextColor(enColor)
-        zhView?.setTextColor(zhColor)
-        // Divider: semi-transparent light line over panel bg
-        val divA = (a * 0.55f).toInt().coerceIn(50, 160)
-        dividerView?.setBackgroundColor(Color.argb(divA, 220, 220, 220))
+        enView?.setTextColorInt(enColor)
+        zhView?.setTextColorInt(zhColor)
+        // Divider: semi-transparent light line (or fully hidden via settings)
+        if (s.overlayShowDivider) {
+            val divA = (a * 0.55f).toInt().coerceIn(50, 160)
+            dividerView?.setBackgroundColor(Color.argb(divA, 220, 220, 220))
+        } else {
+            dividerView?.setBackgroundColor(Color.TRANSPARENT)
+        }
     }
 
     /**
@@ -310,48 +367,42 @@ class SubtitleOverlayService : Service() {
             OverlayTextMode.Both -> {
                 en.visibility = View.VISIBLE
                 zh.visibility = View.VISIBLE
-                div.visibility = View.VISIBLE
                 val top = if (s.overlayTranslationOnTop) zh else en
                 val bottom = if (s.overlayTranslationOnTop) en else zh
                 p.addView(top, halfRowLp())
-                p.addView(div, dividerLp(density))
+                if (s.overlayShowDivider) {
+                    div.visibility = View.VISIBLE
+                    p.addView(div, dividerLp(density))
+                } else {
+                    div.visibility = View.GONE
+                }
                 p.addView(bottom, halfRowLp())
             }
         }
         applyTextStyle(s)
     }
 
-    /** Font size + full-sentence center vs single-line marquee. */
+    /** Font size, padding, full-sentence vs marquee speed. */
     private fun applyTextStyle(s: UserSettings) {
         val density = resources.displayMetrics.density
-        val padH = (14 * density).toInt()
-        val padV = (10 * density).toInt()
+        val padH = (s.overlayPadHDp.coerceIn(0, 32) * density).toInt()
+        val padV = (s.overlayPadVDp.coerceIn(0, 24) * density).toInt()
         val fontSp = s.overlayFontSizeSp.coerceIn(10, 48).toFloat()
         val layout = s.overlayLayoutModeEnum()
+        val speed = s.overlayMarqueeSpeed.coerceIn(20, 160).toFloat()
         listOfNotNull(enView, zhView).forEach { tv ->
             tv.setPadding(padH, padV, padH, padV)
-            tv.textSize = fontSp
+            tv.setTextSizeSp(fontSp)
+            tv.speedPxPerSec = speed
             when (layout) {
-                OverlayLayoutMode.FullSentence -> {
-                    tv.isSingleLine = false
-                    tv.maxLines = 8
-                    tv.ellipsize = null
-                    tv.isSelected = false
-                    tv.gravity = Gravity.CENTER
-                    tv.textAlignment = View.TEXT_ALIGNMENT_CENTER
-                }
-                OverlayLayoutMode.ScrollLine -> {
-                    tv.isSingleLine = true
-                    tv.maxLines = 1
-                    tv.ellipsize = TextUtils.TruncateAt.MARQUEE
-                    tv.marqueeRepeatLimit = -1
-                    tv.isSelected = true
-                    tv.isFocusable = true
-                    tv.gravity = Gravity.CENTER_VERTICAL or Gravity.START
-                    tv.textAlignment = View.TEXT_ALIGNMENT_VIEW_START
-                }
+                OverlayLayoutMode.FullSentence ->
+                    tv.setMode(CaptionLineView.Mode.FullSentence)
+                OverlayLayoutMode.ScrollLine ->
+                    tv.setMode(CaptionLineView.Mode.Marquee)
             }
         }
+        // Full sentence: enable vertical scroll; marquee: single line rows
+        scroll?.isFillViewport = true
     }
 
     /** Full-width row, shares remaining height equally with the other half. */
@@ -432,7 +483,8 @@ class SubtitleOverlayService : Service() {
 
     private fun persistPosition() {
         val lp = layoutParams ?: return
-        OverlayPositionStore.save(this, lp.x, lp.y)
+        val dm = resources.displayMetrics
+        OverlayPositionStore.save(this, lp.x, lp.y, dm)
     }
 
     override fun onDestroy() {

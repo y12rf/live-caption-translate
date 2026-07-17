@@ -157,6 +157,45 @@ class HistoryViewModel(
         }
     }
 
+    /**
+     * Edit one transcript segment; refreshes [detail] in place so search/filter stay consistent.
+     */
+    fun updateSegmentText(segmentId: Long, source: String, translation: String) {
+        viewModelScope.launch {
+            val ok = repo.updateSegmentText(segmentId, source, translation)
+            if (!ok) return@launch
+            val cur = _detail.value ?: return@launch
+            // Reload from DB so incomplete flag matches repository rules
+            val d = repo.getSessionDetail(cur.session.id)
+            if (d != null) {
+                _detail.value = d
+            }
+            // Keep playback active highlight consistent with new list
+            val pos = _playback.value.positionMs
+            if (_playback.value.hasTimeline) {
+                _playback.update {
+                    it.copy(activeSegmentId = activeSegmentIdAt(pos.toLong()))
+                }
+            }
+        }
+    }
+
+    /** Rename session title (list preview / detail header). [sessionId] defaults to open detail. */
+    fun updateSessionTitle(title: String, sessionId: Long? = null) {
+        val id = sessionId ?: _detail.value?.session?.id ?: return
+        viewModelScope.launch {
+            val ok = repo.updateSessionTitle(id, title)
+            if (!ok) return@launch
+            val cur = _detail.value
+            if (cur != null && cur.session.id == id) {
+                _detail.value = cur.copy(
+                    session = cur.session.copy(previewZh = title.trim().take(200))
+                )
+            }
+            // List observes Room Flow — title refresh is automatic.
+        }
+    }
+
     fun prepareSrt(mode: ExportTextMode = ExportTextMode.Both): String? {
         val d = _detail.value ?: return null
         if (d.segments.isEmpty()) return null

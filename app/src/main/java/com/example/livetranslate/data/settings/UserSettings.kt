@@ -4,7 +4,6 @@ import com.example.livetranslate.data.asr.ApiAuthStyle
 import com.example.livetranslate.data.asr.AsrApiStyle
 import com.example.livetranslate.data.llm.LlmConfig
 import com.example.livetranslate.data.llm.LlmReasoningEffort
-import com.example.livetranslate.data.llm.LlmReasoningEffortStyle
 import com.example.livetranslate.data.llm.LlmThinkingMode
 
 data class UserSettings(
@@ -24,20 +23,14 @@ data class UserSettings(
     /** When true, LLM URL is used as-is (no OpenAI path append). */
     val llmFullUrl: Boolean = false,
     /**
-     * Thinking switch: [LlmThinkingMode.Enabled] / [LlmThinkingMode.Disabled].
-     * Wire: `"thinking":{"type":"enabled"|"disabled"}` (default enabled).
-     * Legacy True/Default → Enabled; False → Disabled.
+     * Thinking switch: [LlmThinkingMode.Default] (omit field) /
+     * [LlmThinkingMode.Enabled] / [LlmThinkingMode.Disabled].
      */
-    val llmThinking: String = LlmThinkingMode.Enabled.name,
+    val llmThinking: String = LlmThinkingMode.Default.name,
     /**
-     * Reasoning effort when thinking is enabled: high | max.
-     * low/medium map to high; xhigh maps to max.
+     * OpenAI `reasoning_effort` when thinking is Enabled: low | medium | high | max.
      */
-    val llmReasoningEffort: String = LlmReasoningEffort.High.name,
-    /**
-     * Effort field style: OpenAi (`reasoning_effort`) or Anthropic (`output_config.effort`).
-     */
-    val llmReasoningEffortStyle: String = LlmReasoningEffortStyle.OpenAi.name,
+    val llmReasoningEffort: String = LlmReasoningEffort.Low.name,
     /**
      * Translation system-prompt template. Placeholders:
      * `{{from}}` `{{to}}` `{{glossary}}`
@@ -65,8 +58,17 @@ data class UserSettings(
     val uiLanguage: String = "en",
     val inputLanguage: String = "en",
     val outputLanguage: String = "zh",
-    val silenceMs: Int = 500,
+    /**
+     * Silero library [silenceDurationMs]: hangover after last speech before isSpeech goes false.
+     * Default 300ms matches android-vad recommended Silence Duration.
+     */
+    val silenceMs: Int = 300,
     val maxUtteranceMs: Int = 4_500,
+    /**
+     * Minimum voiced duration for a silence cut to emit.
+     * Shorter cuts **hold PCM and merge into the next speech run** (not discarded).
+     * Stop / max-duration always flush. 0 = no minimum.
+     */
     val minUtteranceMs: Int = 1_700,
     /**
      * Silero VAD confidence mode: [SileroVadMode] name
@@ -128,6 +130,29 @@ data class UserSettings(
     val overlayLayoutMode: String = OverlayLayoutMode.FullSentence.name,
     /** Overlay caption text size in sp (10–48). */
     val overlayFontSizeSp: Int = DEFAULT_OVERLAY_FONT_SP,
+    /**
+     * Horizontal padding (dp) between caption text and overlay border / sides.
+     * Smaller = tighter to edges. Typical 2–12.
+     */
+    val overlayPadHDp: Int = DEFAULT_OVERLAY_PAD_H_DP,
+    /**
+     * Vertical padding (dp) between caption text and border / divider.
+     * Smaller = tighter rows. Typical 0–10.
+     */
+    val overlayPadVDp: Int = DEFAULT_OVERLAY_PAD_V_DP,
+    /**
+     * ScrollLine marquee speed in px/s (20–160). Only used when layout is ScrollLine.
+     */
+    val overlayMarqueeSpeed: Int = DEFAULT_OVERLAY_MARQUEE_SPEED,
+    /**
+     * When true (default), ScrollLine waits for the current caption to finish scrolling
+     * before showing the next committed sentence (no mid-scroll jump).
+     */
+    val overlayMarqueeFinishBeforeNext: Boolean = true,
+    /** Draw stroke around the floating panel (lock green / lock gray). */
+    val overlayShowBorder: Boolean = true,
+    /** Draw the line between source and translation when both are shown. */
+    val overlayShowDivider: Boolean = true,
     /** Live home bilingual panel text size in sp (10–48). */
     val liveFontSizeSp: Int = DEFAULT_LIVE_FONT_SP
 ) {
@@ -147,9 +172,6 @@ data class UserSettings(
 
     fun llmReasoningEffortEnum(): LlmReasoningEffort =
         LlmReasoningEffort.fromStorage(llmReasoningEffort)
-
-    fun llmReasoningEffortStyleEnum(): LlmReasoningEffortStyle =
-        LlmReasoningEffortStyle.fromStorage(llmReasoningEffortStyle)
 
     fun overlayTextModeEnum(): OverlayTextMode = OverlayTextMode.fromStorage(overlayTextMode)
 
@@ -185,8 +207,7 @@ data class UserSettings(
         authStyle = llmAuthStyleEnum(),
         fullUrl = llmFullUrl,
         thinking = llmThinkingMode(),
-        reasoningEffort = llmReasoningEffortEnum(),
-        reasoningEffortStyle = llmReasoningEffortStyleEnum()
+        reasoningEffort = llmReasoningEffortEnum()
     )
 
     companion object {
@@ -246,6 +267,11 @@ data class UserSettings(
         const val DEFAULT_OVERLAY_WIDTH_DP = 360
         const val DEFAULT_OVERLAY_HEIGHT_DP = 140
         const val DEFAULT_OVERLAY_ALPHA = 80
+        /** Tighter than the old hard-coded 14dp. */
+        const val DEFAULT_OVERLAY_PAD_H_DP = 6
+        /** Tighter than the old hard-coded 10dp. */
+        const val DEFAULT_OVERLAY_PAD_V_DP = 4
+        const val DEFAULT_OVERLAY_MARQUEE_SPEED = 60
 
         /** Reset caption-related fields (overlay + live font) to defaults. */
         fun captionDefaults(): UserSettings = UserSettings()

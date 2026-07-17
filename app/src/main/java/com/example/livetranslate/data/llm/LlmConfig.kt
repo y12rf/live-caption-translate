@@ -30,10 +30,11 @@ data class LlmConfig(
     val authStyle: ApiAuthStyle = ApiAuthStyle.Bearer,
     /** When true, use [baseUrl] as-is (no path append). */
     val fullUrl: Boolean = false,
-    /** `"thinking":{"type":"enabled"|"disabled"}` — default enabled. */
-    val thinking: LlmThinkingMode = LlmThinkingMode.Enabled,
-    /** Effort when thinking is enabled (`high` / `max`). */
-    val reasoningEffort: LlmReasoningEffort = LlmReasoningEffort.High,
-    /** OpenAI `reasoning_effort` vs Anthropic `output_config.effort`. */
-    val reasoningEffortStyle: LlmReasoningEffortStyle = LlmReasoningEffortStyle.OpenAi
+    /**
+     * Thinking switch: [LlmThinkingMode.Default] omits the field;
+     * Enabled / Disabled send `"thinking":{"type":...}`.
+     */
+    val thinking: LlmThinkingMode = LlmThinkingMode.Default,
+    /** OpenAI `reasoning_effort` when thinking is Enabled (low|medium|high|max). */
+    val reasoningEffort: LlmReasoningEffort = LlmReasoningEffort.Low
 )

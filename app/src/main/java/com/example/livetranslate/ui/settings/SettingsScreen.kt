@@ -57,7 +57,6 @@ import com.example.livetranslate.R
 import com.example.livetranslate.data.asr.ApiAuthStyle
 import com.example.livetranslate.data.asr.AsrApiStyle
 import com.example.livetranslate.data.llm.LlmReasoningEffort
-import com.example.livetranslate.data.llm.LlmReasoningEffortStyle
 import com.example.livetranslate.data.settings.SileroVadMode
 import com.example.livetranslate.data.llm.LlmThinkingMode
 import com.example.livetranslate.data.settings.GlossaryEntry
@@ -394,44 +393,24 @@ private fun GeneralCategoryContent(
             onUpdate { s -> s.copy(uiLanguage = code) }
         }
     )
-    OutlinedButton(
-        onClick = { onUpdate { s -> s.copy(uiLanguage = UserSettings().uiLanguage) } },
-        modifier = Modifier.fillMaxWidth()
-    ) { Text(stringResource(R.string.settings_reset_ui_language)) }
 
     Spacer(Modifier.height(16.dp))
     sectionTitle(labels.displayTitle) { onInfo(labels.displayTitle, labels.displayInfo) }
     switchField(
         label = labels.keepScreenLabel,
         checked = d.keepScreenOn,
-        onChange = { onUpdate { s -> s.copy(keepScreenOn = it) } },
-        onInfo = { onInfo(labels.keepScreenLabel, labels.keepScreenInfo) }
+        onChange = { onUpdate { s -> s.copy(keepScreenOn = it) } }
     )
     switchField(
         label = labels.immersiveLabel,
         checked = d.immersiveMode,
-        onChange = { onUpdate { s -> s.copy(immersiveMode = it) } },
-        onInfo = { onInfo(labels.immersiveLabel, labels.immersiveInfo) }
+        onChange = { onUpdate { s -> s.copy(immersiveMode = it) } }
     )
     switchField(
         label = labels.asrOnlyTitle,
         checked = d.asrOnlyMode,
-        onChange = { onUpdate { s -> s.copy(asrOnlyMode = it) } },
-        onInfo = { onInfo(labels.asrOnlyTitle, labels.asrOnlyInfo) }
+        onChange = { onUpdate { s -> s.copy(asrOnlyMode = it) } }
     )
-    OutlinedButton(
-        onClick = {
-            val def = UserSettings()
-            onUpdate { s ->
-                s.copy(
-                    keepScreenOn = def.keepScreenOn,
-                    immersiveMode = def.immersiveMode,
-                    asrOnlyMode = def.asrOnlyMode
-                )
-            }
-        },
-        modifier = Modifier.fillMaxWidth()
-    ) { Text(stringResource(R.string.settings_reset_display)) }
 }
 
 @Composable
@@ -447,40 +426,34 @@ private fun AsrCategoryContent(
     field(
         label = labels.apiUrlLabel,
         value = d.asrBaseUrl,
-        onChange = { onUpdate { s -> s.copy(asrBaseUrl = it) } },
-        onInfo = { onInfo(labels.apiUrlLabel, labels.apiUrlAsrInfo) }
+        onChange = { onUpdate { s -> s.copy(asrBaseUrl = it) } }
     )
     switchField(
         label = labels.fullUrlLabel,
         checked = d.asrFullUrl,
-        onChange = { onUpdate { s -> s.copy(asrFullUrl = it) } },
-        onInfo = { onInfo(labels.fullUrlTitle, labels.fullUrlInfo) }
+        onChange = { onUpdate { s -> s.copy(asrFullUrl = it) } }
     )
     secretField(
         label = labels.apiKeyLabel,
         value = d.asrApiKey,
-        onChange = { onUpdate { s -> s.copy(asrApiKey = it) } },
-        onInfo = { onInfo(labels.apiKeyLabel, labels.apiKeyInfo) }
+        onChange = { onUpdate { s -> s.copy(asrApiKey = it) } }
     )
     field(
         label = labels.modelLabel,
         value = d.asrModel,
-        onChange = { onUpdate { s -> s.copy(asrModel = it) } },
-        onInfo = { onInfo(labels.modelLabel, labels.modelInfo) }
+        onChange = { onUpdate { s -> s.copy(asrModel = it) } }
     )
     dropdownField(
         label = labels.asrStyleLabel,
         value = d.asrApiStyle,
         options = AsrApiStyle.entries.map { it.name },
-        onSelect = { onUpdate { s -> s.copy(asrApiStyle = it) } },
-        onInfo = { onInfo(labels.asrStyleLabel, labels.asrStyleInfo) }
+        onSelect = { onUpdate { s -> s.copy(asrApiStyle = it) } }
     )
     dropdownField(
         label = labels.asrAuthLabel,
         value = d.asrAuthStyle,
         options = ApiAuthStyle.entries.map { it.name },
-        onSelect = { onUpdate { s -> s.copy(asrAuthStyle = it) } },
-        onInfo = { onInfo(labels.asrAuthLabel, labels.asrAuthInfo) }
+        onSelect = { onUpdate { s -> s.copy(asrAuthStyle = it) } }
     )
     Button(
         onClick = onTestAsr,
@@ -496,21 +469,6 @@ private fun AsrCategoryContent(
         Spacer(Modifier.height(4.dp))
         Text(it)
     }
-    OutlinedButton(
-        onClick = {
-            val def = UserSettings()
-            onUpdate { s ->
-                s.copy(
-                    asrBaseUrl = def.asrBaseUrl,
-                    asrModel = def.asrModel,
-                    asrApiStyle = def.asrApiStyle,
-                    asrAuthStyle = def.asrAuthStyle,
-                    asrFullUrl = def.asrFullUrl
-                )
-            }
-        },
-        modifier = Modifier.fillMaxWidth()
-    ) { Text(stringResource(R.string.settings_reset_asr)) }
 }
 
 @Composable
@@ -526,54 +484,40 @@ private fun LlmCategoryContent(
     field(
         label = labels.apiUrlLabel,
         value = d.llmBaseUrl,
-        onChange = { onUpdate { s -> s.copy(llmBaseUrl = it) } },
-        onInfo = { onInfo(labels.apiUrlLabel, labels.apiUrlLlmInfo) }
+        onChange = { onUpdate { s -> s.copy(llmBaseUrl = it) } }
     )
     switchField(
         label = labels.fullUrlLabel,
         checked = d.llmFullUrl,
-        onChange = { onUpdate { s -> s.copy(llmFullUrl = it) } },
-        onInfo = { onInfo(labels.fullUrlTitle, labels.fullUrlInfo) }
+        onChange = { onUpdate { s -> s.copy(llmFullUrl = it) } }
     )
     secretField(
         label = labels.apiKeyLabel,
         value = d.llmApiKey,
-        onChange = { onUpdate { s -> s.copy(llmApiKey = it) } },
-        onInfo = { onInfo(labels.apiKeyLabel, labels.apiKeyInfo) }
+        onChange = { onUpdate { s -> s.copy(llmApiKey = it) } }
     )
     field(
         label = labels.modelLabel,
         value = d.llmModel,
-        onChange = { onUpdate { s -> s.copy(llmModel = it) } },
-        onInfo = { onInfo(labels.modelLabel, labels.modelInfo) }
+        onChange = { onUpdate { s -> s.copy(llmModel = it) } }
     )
     dropdownField(
         label = labels.llmAuthLabel,
         value = d.llmAuthStyle,
         options = ApiAuthStyle.entries.map { it.name },
-        onSelect = { onUpdate { s -> s.copy(llmAuthStyle = it) } },
-        onInfo = { onInfo(labels.llmAuthLabel, labels.llmAuthInfo) }
+        onSelect = { onUpdate { s -> s.copy(llmAuthStyle = it) } }
     )
     dropdownField(
         label = labels.thinkingLabel,
         value = LlmThinkingMode.fromStorage(d.llmThinking).name,
         options = LlmThinkingMode.entries.map { it.name },
-        onSelect = { onUpdate { s -> s.copy(llmThinking = it) } },
-        onInfo = { onInfo(labels.thinkingLabel, labels.thinkingInfo) }
+        onSelect = { onUpdate { s -> s.copy(llmThinking = it) } }
     )
     dropdownField(
         label = labels.effortLabel,
         value = LlmReasoningEffort.fromStorage(d.llmReasoningEffort).name,
         options = LlmReasoningEffort.entries.map { it.name },
-        onSelect = { onUpdate { s -> s.copy(llmReasoningEffort = it) } },
-        onInfo = { onInfo(labels.effortLabel, labels.effortInfo) }
-    )
-    dropdownField(
-        label = labels.effortStyleLabel,
-        value = LlmReasoningEffortStyle.fromStorage(d.llmReasoningEffortStyle).name,
-        options = LlmReasoningEffortStyle.entries.map { it.name },
-        onSelect = { onUpdate { s -> s.copy(llmReasoningEffortStyle = it) } },
-        onInfo = { onInfo(labels.effortStyleLabel, labels.effortStyleInfo) }
+        onSelect = { onUpdate { s -> s.copy(llmReasoningEffort = it) } }
     )
     Button(
         onClick = onTestLlm,
@@ -592,25 +536,11 @@ private fun LlmCategoryContent(
     Spacer(Modifier.height(12.dp))
     val promptSection = stringResource(R.string.settings_prompt_section)
     val promptSectionInfo = stringResource(R.string.settings_prompt_section_info)
-    val systemPromptLabel = stringResource(R.string.settings_system_prompt)
-    val systemPromptTitle = stringResource(R.string.settings_prompt_title)
-    val systemPromptInfo = stringResource(R.string.settings_info_system_prompt)
-    val userPromptLabel = stringResource(R.string.settings_user_prompt)
-    val userPromptTitle = stringResource(R.string.settings_user_prompt_title)
-    val userPromptInfo = stringResource(R.string.settings_info_user_prompt)
-    val titleSysLabel = stringResource(R.string.settings_title_system_prompt)
-    val titleSysTitle = stringResource(R.string.settings_title_system_prompt_title)
-    val titleSysInfo = stringResource(R.string.settings_info_title_system_prompt)
-    val titleUserLabel = stringResource(R.string.settings_title_user_prompt)
-    val titleUserTitle = stringResource(R.string.settings_title_user_prompt_title)
-    val titleUserInfo = stringResource(R.string.settings_info_title_user_prompt)
-
     sectionTitle(promptSection) { onInfo(promptSection, promptSectionInfo) }
     multilineField(
-        label = systemPromptLabel,
+        label = stringResource(R.string.settings_system_prompt),
         value = d.llmSystemPrompt,
         onChange = { onUpdate { s -> s.copy(llmSystemPrompt = it) } },
-        onInfo = { onInfo(systemPromptTitle, systemPromptInfo) },
         minHeight = 160
     )
     OutlinedButton(
@@ -623,24 +553,21 @@ private fun LlmCategoryContent(
         modifier = Modifier.fillMaxWidth()
     ) { Text(stringResource(R.string.glossary_insert_placeholder)) }
     multilineField(
-        label = userPromptLabel,
+        label = stringResource(R.string.settings_user_prompt),
         value = d.llmUserPrompt,
         onChange = { onUpdate { s -> s.copy(llmUserPrompt = it) } },
-        onInfo = { onInfo(userPromptTitle, userPromptInfo) },
         minHeight = 140
     )
     multilineField(
-        label = titleSysLabel,
+        label = stringResource(R.string.settings_title_system_prompt),
         value = d.llmTitleSystemPrompt,
         onChange = { onUpdate { s -> s.copy(llmTitleSystemPrompt = it) } },
-        onInfo = { onInfo(titleSysTitle, titleSysInfo) },
         minHeight = 100
     )
     multilineField(
-        label = titleUserLabel,
+        label = stringResource(R.string.settings_title_user_prompt),
         value = d.llmTitleUserPrompt,
         onChange = { onUpdate { s -> s.copy(llmTitleUserPrompt = it) } },
-        onInfo = { onInfo(titleUserTitle, titleUserInfo) },
         minHeight = 120
     )
     OutlinedButton(
@@ -667,7 +594,6 @@ private fun LlmCategoryContent(
                     llmFullUrl = def.llmFullUrl,
                     llmThinking = def.llmThinking,
                     llmReasoningEffort = def.llmReasoningEffort,
-                    llmReasoningEffortStyle = def.llmReasoningEffortStyle,
                     llmSystemPrompt = UserSettings.DEFAULT_LLM_SYSTEM_PROMPT,
                     llmUserPrompt = UserSettings.DEFAULT_LLM_USER_PROMPT,
                     llmTitleSystemPrompt = UserSettings.DEFAULT_LLM_TITLE_SYSTEM_PROMPT,
@@ -745,27 +671,13 @@ private fun LlmCategoryContent(
     field(
         label = labels.inputLangLabel,
         value = d.inputLanguage,
-        onChange = { onUpdate { s -> s.copy(inputLanguage = it) } },
-        onInfo = { onInfo(labels.inputLangLabel, labels.inputLangInfo) }
+        onChange = { onUpdate { s -> s.copy(inputLanguage = it) } }
     )
     field(
         label = labels.outputLangLabel,
         value = d.outputLanguage,
-        onChange = { onUpdate { s -> s.copy(outputLanguage = it) } },
-        onInfo = { onInfo(labels.outputLangLabel, labels.outputLangInfo) }
+        onChange = { onUpdate { s -> s.copy(outputLanguage = it) } }
     )
-    OutlinedButton(
-        onClick = {
-            val def = UserSettings()
-            onUpdate { s ->
-                s.copy(
-                    inputLanguage = def.inputLanguage,
-                    outputLanguage = def.outputLanguage
-                )
-            }
-        },
-        modifier = Modifier.fillMaxWidth()
-    ) { Text(stringResource(R.string.settings_reset_languages)) }
 }
 
 @Composable
@@ -781,39 +693,34 @@ private fun AudioPipelineCategoryContent(
         value = d.silenceMs.toString(),
         onChange = {
             it.toIntOrNull()?.let { v -> onUpdate { s -> s.copy(silenceMs = v) } }
-        },
-        onInfo = { onInfo(labels.silenceLabel, labels.silenceInfo) }
+        }
     )
     field(
         label = labels.maxUttLabel,
         value = d.maxUtteranceMs.toString(),
         onChange = {
             it.toIntOrNull()?.let { v -> onUpdate { s -> s.copy(maxUtteranceMs = v) } }
-        },
-        onInfo = { onInfo(labels.maxUttLabel, labels.maxUttInfo) }
+        }
     )
     field(
         label = labels.minUttLabel,
         value = d.minUtteranceMs.toString(),
         onChange = {
             it.toIntOrNull()?.let { v -> onUpdate { s -> s.copy(minUtteranceMs = v) } }
-        },
-        onInfo = { onInfo(labels.minUttLabel, labels.minUttInfo) }
+        }
     )
     dropdownField(
         label = labels.sileroModeLabel,
         value = SileroVadMode.fromStorage(d.sileroVadMode).name,
         options = SileroVadMode.entries.map { it.name },
-        onSelect = { onUpdate { s -> s.copy(sileroVadMode = it) } },
-        onInfo = { onInfo(labels.sileroModeLabel, labels.sileroModeInfo) }
+        onSelect = { onUpdate { s -> s.copy(sileroVadMode = it) } }
     )
     field(
         label = labels.contextLabel,
         value = d.contextWindowSize.toString(),
         onChange = {
             it.toIntOrNull()?.let { v -> onUpdate { s -> s.copy(contextWindowSize = v) } }
-        },
-        onInfo = { onInfo(labels.contextLabel, labels.contextInfo) }
+        }
     )
     OutlinedButton(
         onClick = {
@@ -838,32 +745,28 @@ private fun AudioPipelineCategoryContent(
         value = d.offlineVadBatchSize.toString(),
         onChange = {
             it.toIntOrNull()?.let { v -> onUpdate { s -> s.copy(offlineVadBatchSize = v) } }
-        },
-        onInfo = { onInfo(labels.offlineBatchLabel, labels.offlineBatchInfo) }
+        }
     )
     field(
         label = labels.titleThresholdLabel,
         value = d.titleTurnThreshold.toString(),
         onChange = {
             it.toIntOrNull()?.let { v -> onUpdate { s -> s.copy(titleTurnThreshold = v) } }
-        },
-        onInfo = { onInfo(labels.titleThresholdLabel, labels.titleThresholdInfo) }
+        }
     )
     field(
         label = labels.maxAttemptsLabel,
         value = d.maxNetworkAttempts.toString(),
         onChange = {
             it.toIntOrNull()?.let { v -> onUpdate { s -> s.copy(maxNetworkAttempts = v) } }
-        },
-        onInfo = { onInfo(labels.maxAttemptsLabel, labels.maxAttemptsInfo) }
+        }
     )
     field(
         label = labels.translationCacheLabel,
         value = d.translationCacheMax.toString(),
         onChange = {
             it.toIntOrNull()?.let { v -> onUpdate { s -> s.copy(translationCacheMax = v) } }
-        },
-        onInfo = { onInfo(labels.translationCacheLabel, labels.cacheMaxInfo) }
+        }
     )
     OutlinedButton(
         onClick = {
@@ -892,80 +795,105 @@ private fun AppearanceCategoryContent(
     switchField(
         label = stringResource(R.string.overlay_translation_on_top),
         checked = d.overlayTranslationOnTop,
-        onChange = { onUpdate { s -> s.copy(overlayTranslationOnTop = it) } },
-        onInfo = { onInfo(labels.orderTitle, labels.orderInfo) }
+        onChange = { onUpdate { s -> s.copy(overlayTranslationOnTop = it) } }
     )
     dropdownField(
         label = labels.textModeTitle,
         value = d.overlayTextMode,
         options = OverlayTextMode.entries.map { it.name },
-        onSelect = { onUpdate { s -> s.copy(overlayTextMode = it) } },
-        onInfo = { onInfo(labels.textModeTitle, labels.textModeInfo) }
+        onSelect = { onUpdate { s -> s.copy(overlayTextMode = it) } }
     )
     dropdownField(
         label = labels.layoutTitle,
         value = d.overlayLayoutMode,
         options = OverlayLayoutMode.entries.map { it.name },
-        onSelect = { onUpdate { s -> s.copy(overlayLayoutMode = it) } },
-        onInfo = { onInfo(labels.layoutTitle, labels.layoutInfo) }
+        onSelect = { onUpdate { s -> s.copy(overlayLayoutMode = it) } }
     )
     field(
         label = labels.overlayFontLabel,
         value = d.overlayFontSizeSp.toString(),
         onChange = {
             it.toIntOrNull()?.let { v -> onUpdate { s -> s.copy(overlayFontSizeSp = v) } }
-        },
-        onInfo = { onInfo(labels.overlayFontLabel, labels.overlayFontInfo) }
+        }
+    )
+    field(
+        label = labels.overlayPadHLabel,
+        value = d.overlayPadHDp.toString(),
+        onChange = {
+            it.toIntOrNull()?.let { v -> onUpdate { s -> s.copy(overlayPadHDp = v) } }
+        }
+    )
+    field(
+        label = labels.overlayPadVLabel,
+        value = d.overlayPadVDp.toString(),
+        onChange = {
+            it.toIntOrNull()?.let { v -> onUpdate { s -> s.copy(overlayPadVDp = v) } }
+        }
+    )
+    field(
+        label = labels.overlayMarqueeSpeedLabel,
+        value = d.overlayMarqueeSpeed.toString(),
+        onChange = {
+            it.toIntOrNull()?.let { v -> onUpdate { s -> s.copy(overlayMarqueeSpeed = v) } }
+        }
+    )
+    switchField(
+        label = labels.overlayMarqueeFinishLabel,
+        checked = d.overlayMarqueeFinishBeforeNext,
+        onChange = { onUpdate { s -> s.copy(overlayMarqueeFinishBeforeNext = it) } }
+    )
+    switchField(
+        label = labels.overlayShowBorderLabel,
+        checked = d.overlayShowBorder,
+        onChange = { onUpdate { s -> s.copy(overlayShowBorder = it) } }
+    )
+    switchField(
+        label = labels.overlayShowDividerLabel,
+        checked = d.overlayShowDivider,
+        onChange = { onUpdate { s -> s.copy(overlayShowDivider = it) } }
     )
     field(
         label = labels.liveFontLabel,
         value = d.liveFontSizeSp.toString(),
         onChange = {
             it.toIntOrNull()?.let { v -> onUpdate { s -> s.copy(liveFontSizeSp = v) } }
-        },
-        onInfo = { onInfo(labels.liveFontLabel, labels.liveFontInfo) }
+        }
     )
     field(
         label = labels.overlayWLabel,
         value = d.overlayMaxWidthDp.toString(),
         onChange = {
             it.toIntOrNull()?.let { v -> onUpdate { s -> s.copy(overlayMaxWidthDp = v) } }
-        },
-        onInfo = { onInfo(labels.overlayWLabel, labels.overlaySizeInfo) }
+        }
     )
     field(
         label = labels.overlayHLabel,
         value = d.overlayMaxHeightDp.toString(),
         onChange = {
             it.toIntOrNull()?.let { v -> onUpdate { s -> s.copy(overlayMaxHeightDp = v) } }
-        },
-        onInfo = { onInfo(labels.overlayHLabel, labels.overlaySizeInfo) }
+        }
     )
     field(
         label = labels.overlayAlphaLabel,
         value = d.overlayAlphaPercent.toString(),
         onChange = {
             it.toIntOrNull()?.let { v -> onUpdate { s -> s.copy(overlayAlphaPercent = v) } }
-        },
-        onInfo = { onInfo(labels.overlayAlphaLabel, labels.overlayColorInfo) }
+        }
     )
     field(
         label = labels.overlayBgLabel,
         value = d.overlayBgColor,
-        onChange = { onUpdate { s -> s.copy(overlayBgColor = it) } },
-        onInfo = { onInfo(labels.overlayBgLabel, labels.overlayColorInfo) }
+        onChange = { onUpdate { s -> s.copy(overlayBgColor = it) } }
     )
     field(
         label = labels.overlayEnColorLabel,
         value = d.overlayEnTextColor,
-        onChange = { onUpdate { s -> s.copy(overlayEnTextColor = it) } },
-        onInfo = { onInfo(labels.overlayEnColorLabel, labels.overlayColorInfo) }
+        onChange = { onUpdate { s -> s.copy(overlayEnTextColor = it) } }
     )
     field(
         label = labels.overlayZhColorLabel,
         value = d.overlayZhTextColor,
-        onChange = { onUpdate { s -> s.copy(overlayZhTextColor = it) } },
-        onInfo = { onInfo(labels.overlayZhColorLabel, labels.overlayColorInfo) }
+        onChange = { onUpdate { s -> s.copy(overlayZhTextColor = it) } }
     )
     Button(
         onClick = {
@@ -982,6 +910,12 @@ private fun AppearanceCategoryContent(
                     overlayTextMode = def.overlayTextMode,
                     overlayLayoutMode = def.overlayLayoutMode,
                     overlayFontSizeSp = UserSettings.DEFAULT_OVERLAY_FONT_SP,
+                    overlayPadHDp = UserSettings.DEFAULT_OVERLAY_PAD_H_DP,
+                    overlayPadVDp = UserSettings.DEFAULT_OVERLAY_PAD_V_DP,
+                    overlayMarqueeSpeed = UserSettings.DEFAULT_OVERLAY_MARQUEE_SPEED,
+                    overlayMarqueeFinishBeforeNext = true,
+                    overlayShowBorder = true,
+                    overlayShowDivider = true,
                     liveFontSizeSp = UserSettings.DEFAULT_LIVE_FONT_SP
                 )
             }
@@ -1126,8 +1060,7 @@ private data class SettingsLabels(
     val thinkingInfo: String,
     val effortLabel: String,
     val effortInfo: String,
-    val effortStyleLabel: String,
-    val effortStyleInfo: String,
+
     val promptTitle: String,
     val promptInfo: String,
     val glossarySection: String,
@@ -1152,6 +1085,12 @@ private data class SettingsLabels(
     val contextLabel: String,
     val contextInfo: String,
     val overlayFontLabel: String,
+    val overlayPadHLabel: String,
+    val overlayPadVLabel: String,
+    val overlayMarqueeSpeedLabel: String,
+    val overlayMarqueeFinishLabel: String,
+    val overlayShowBorderLabel: String,
+    val overlayShowDividerLabel: String,
     val liveFontLabel: String,
     val overlayWLabel: String,
     val overlayHLabel: String,
@@ -1226,8 +1165,7 @@ private fun rememberSettingsLabels(): SettingsLabels = SettingsLabels(
     thinkingInfo = stringResource(R.string.settings_info_thinking),
     effortLabel = stringResource(R.string.settings_reasoning_effort),
     effortInfo = stringResource(R.string.settings_info_reasoning_effort),
-    effortStyleLabel = stringResource(R.string.settings_reasoning_effort_style),
-    effortStyleInfo = stringResource(R.string.settings_info_reasoning_effort_style),
+
     promptTitle = stringResource(R.string.settings_prompt_title),
     promptInfo = stringResource(R.string.settings_info_system_prompt),
     glossarySection = stringResource(R.string.glossary_section),
@@ -1252,6 +1190,12 @@ private fun rememberSettingsLabels(): SettingsLabels = SettingsLabels(
     contextLabel = stringResource(R.string.settings_context_n),
     contextInfo = stringResource(R.string.settings_info_context_n),
     overlayFontLabel = stringResource(R.string.settings_overlay_font_sp),
+    overlayPadHLabel = stringResource(R.string.settings_overlay_pad_h),
+    overlayPadVLabel = stringResource(R.string.settings_overlay_pad_v),
+    overlayMarqueeSpeedLabel = stringResource(R.string.settings_overlay_marquee_speed),
+    overlayMarqueeFinishLabel = stringResource(R.string.settings_overlay_marquee_finish),
+    overlayShowBorderLabel = stringResource(R.string.settings_overlay_show_border),
+    overlayShowDividerLabel = stringResource(R.string.settings_overlay_show_divider),
     liveFontLabel = stringResource(R.string.settings_live_font_sp),
     overlayWLabel = stringResource(R.string.settings_overlay_w),
     overlayHLabel = stringResource(R.string.settings_overlay_h),
@@ -1331,12 +1275,10 @@ private fun dropdownField(
     label: String,
     value: String,
     options: List<String>,
-    onSelect: (String) -> Unit,
-    onInfo: (() -> Unit)? = null
+    onSelect: (String) -> Unit
 ) {
     var expanded by remember { mutableStateOf(false) }
     val display = if (options.contains(value)) value else (options.firstOrNull() ?: value)
-    val infoCd = stringResource(R.string.settings_info)
     val expandCd = stringResource(R.string.settings_expand)
 
     ExposedDropdownMenuBox(
@@ -1352,14 +1294,7 @@ private fun dropdownField(
             readOnly = true,
             label = { Text(label) },
             trailingIcon = {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    if (onInfo != null) {
-                        IconButton(onClick = onInfo) {
-                            Icon(Icons.Outlined.Info, contentDescription = infoCd)
-                        }
-                    }
-                    Icon(Icons.Filled.ArrowDropDown, contentDescription = expandCd)
-                }
+                Icon(Icons.Filled.ArrowDropDown, contentDescription = expandCd)
             },
             modifier = Modifier
                 .menuAnchor()
@@ -1387,8 +1322,7 @@ private fun dropdownField(
 private fun switchField(
     label: String,
     checked: Boolean,
-    onChange: (Boolean) -> Unit,
-    onInfo: (() -> Unit)? = null
+    onChange: (Boolean) -> Unit
 ) {
     Row(
         verticalAlignment = Alignment.CenterVertically,
@@ -1397,9 +1331,6 @@ private fun switchField(
             .padding(vertical = 6.dp)
     ) {
         Text(label, modifier = Modifier.weight(1f))
-        if (onInfo != null) {
-            InfoButton(onClick = onInfo)
-        }
         Switch(checked = checked, onCheckedChange = onChange)
     }
 }
@@ -1408,8 +1339,7 @@ private fun switchField(
 private fun field(
     label: String,
     value: String,
-    onChange: (String) -> Unit,
-    onInfo: (() -> Unit)? = null
+    onChange: (String) -> Unit
 ) {
     OutlinedTextField(
         value = value,
@@ -1418,12 +1348,7 @@ private fun field(
         modifier = Modifier
             .fillMaxWidth()
             .padding(vertical = 4.dp),
-        singleLine = true,
-        trailingIcon = if (onInfo != null) {
-            { InfoButton(onClick = onInfo) }
-        } else {
-            null
-        }
+        singleLine = true
     )
 }
 
@@ -1432,8 +1357,7 @@ private fun field(
 private fun secretField(
     label: String,
     value: String,
-    onChange: (String) -> Unit,
-    onInfo: (() -> Unit)? = null
+    onChange: (String) -> Unit
 ) {
     var visible by remember { mutableStateOf(false) }
     val showLabel = stringResource(R.string.settings_api_key_show)
@@ -1452,20 +1376,15 @@ private fun secretField(
             PasswordVisualTransformation()
         },
         trailingIcon = {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                if (onInfo != null) {
-                    InfoButton(onClick = onInfo)
-                }
-                IconButton(onClick = { visible = !visible }) {
-                    Icon(
-                        imageVector = if (visible) {
-                            Icons.Filled.VisibilityOff
-                        } else {
-                            Icons.Filled.Visibility
-                        },
-                        contentDescription = if (visible) hideLabel else showLabel
-                    )
-                }
+            IconButton(onClick = { visible = !visible }) {
+                Icon(
+                    imageVector = if (visible) {
+                        Icons.Filled.VisibilityOff
+                    } else {
+                        Icons.Filled.Visibility
+                    },
+                    contentDescription = if (visible) hideLabel else showLabel
+                )
             }
         }
     )
@@ -1476,7 +1395,6 @@ private fun multilineField(
     label: String,
     value: String,
     onChange: (String) -> Unit,
-    onInfo: (() -> Unit)? = null,
     minHeight: Int = 140
 ) {
     OutlinedTextField(
@@ -1489,12 +1407,7 @@ private fun multilineField(
             .height(minHeight.dp),
         singleLine = false,
         minLines = 3,
-        maxLines = 16,
-        trailingIcon = if (onInfo != null) {
-            { InfoButton(onClick = onInfo) }
-        } else {
-            null
-        }
+        maxLines = 16
     )
 }
 

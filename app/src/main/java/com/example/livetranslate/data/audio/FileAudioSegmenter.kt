@@ -44,15 +44,19 @@ class FileAudioSegmenter(
                     ?: throw IllegalStateException("FileAudioSegmenter needs Context for Silero VAD")
                 SileroSpeechClassifier(
                     context = ctx,
-                    mode = SileroVadMode.fromStorage(settings.sileroVadMode)
+                    mode = SileroVadMode.fromStorage(settings.sileroVadMode),
+                    silenceDurationMs = settings.silenceMs
                 )
             }
 
+        // Silero applies silenceDuration hangover; packer cuts on first non-speech after that.
+        // Test injectors (EnergySpeechClassifier) need postSpeechQuietMs = settings.silenceMs.
+        val postQuietMs = if (classifierFactory != null) settings.silenceMs else 0
         val vad = EnergyVad(
             sampleRate = targetSampleRate,
             frameSamples = frameSamples,
             classifier = classifier,
-            silenceMs = settings.silenceMs,
+            postSpeechQuietMs = postQuietMs,
             maxUtteranceMs = settings.maxUtteranceMs,
             minUtteranceMs = settings.minUtteranceMs
         )

@@ -99,8 +99,7 @@ class LlmClient(
             LlmThinkingBody.appendAfterMessages(
                 this,
                 mode = config.thinking,
-                effort = config.reasoningEffort,
-                style = config.reasoningEffortStyle
+                effort = config.reasoningEffort
             )
             append('}')
         }
@@ -200,8 +199,7 @@ class LlmClient(
             LlmThinkingBody.appendAfterMessages(
                 this,
                 mode = config.thinking,
-                effort = config.reasoningEffort,
-                style = config.reasoningEffortStyle
+                effort = config.reasoningEffort
             )
             append('}')
         }
