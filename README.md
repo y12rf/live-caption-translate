@@ -4,6 +4,9 @@
 
 **English** · [中文](README.zh-CN.md)
 
+[![CI & Release](https://github.com/y12rf/live-caption-translate/actions/workflows/ci-release.yml/badge.svg)](https://github.com/y12rf/live-caption-translate/actions/workflows/ci-release.yml)
+[![GitHub release](https://img.shields.io/github/v/release/y12rf/live-caption-translate)](https://github.com/y12rf/live-caption-translate/releases)
+
 Near-real-time speech → OpenAI-compatible **ASR stream** → **LLM stream** translation → bilingual UI / floating captions → Room history + session WAV.
 
 Bring your own ASR / LLM API keys .
@@ -33,11 +36,13 @@ Bring your own ASR / LLM API keys .
 
 **Requirements:** JDK 17, Android SDK 34, device/emulator API 26+.
 
+**Prebuilt APKs:** every push to `master` runs CI and publishes a [GitHub Release](https://github.com/y12rf/live-caption-translate/releases) with arm64 / x86 APKs (debug-keystore signed, sideload only).
+
 ```bat
 gradlew.bat :app:testDebugUnitTest :app:assembleDebug
 ```
 
-1. Install a debug APK from `app/build/outputs/apk/debug/`.
+1. Install a debug APK from `app/build/outputs/apk/debug/`, or grab a Release build.
 2. Open **Settings** → set ASR / LLM URL, API key, model, auth style.
 3. On Live: pick source → **Start**. Optional floating overlay (notification lock/unlock). Full-screen bilingual: top-bar fullscreen icon.
 

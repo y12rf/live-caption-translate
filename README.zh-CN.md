@@ -4,6 +4,9 @@
 
 [English](README.md) · **中文**
 
+[![CI & Release](https://github.com/y12rf/live-caption-translate/actions/workflows/ci-release.yml/badge.svg)](https://github.com/y12rf/live-caption-translate/actions/workflows/ci-release.yml)
+[![GitHub release](https://img.shields.io/github/v/release/y12rf/live-caption-translate)](https://github.com/y12rf/live-caption-translate/releases)
+
 近实时语音 → OpenAI 兼容 **ASR 流式识别** → **LLM 流式翻译** → 双语界面 / 悬浮字幕 → Room 历史 + 会话录音 WAV。
 
 自备 ASR / LLM API Key。
@@ -33,11 +36,13 @@
 
 **环境要求：** JDK 17、Android SDK 34、真机/模拟器 API 26+。
 
+**预编译 APK：** 每次向 `master` 推送会跑 CI，并在 [Releases](https://github.com/y12rf/live-caption-translate/releases) 发布 arm64 / x86 安装包（debug 签名，仅适合旁加载）。
+
 ```bat
 gradlew.bat :app:testDebugUnitTest :app:assembleDebug
 ```
 
-1. 安装 `app/build/outputs/apk/debug/` 下的 debug APK。
+1. 安装 `app/build/outputs/apk/debug/` 下的 debug APK，或从 Release 下载。
 2. 打开 **设置** → 填写 ASR / LLM 的 URL、API Key、模型、鉴权方式。
 3. 在 **实时** 页选择音源 → **开始**。可选悬浮字幕（通知栏锁定/解锁拖动）。顶栏全屏图标进入沉浸双语。
 
