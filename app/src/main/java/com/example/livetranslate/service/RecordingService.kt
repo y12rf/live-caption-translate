@@ -106,8 +106,20 @@ class RecordingService : Service() {
                 stopSelf()
                 return START_NOT_STICKY
             }
-            // Session still active after process death: keep service alive but do not
-            // invent a new capture path without an explicit ACTION_START / RESUME.
+            // Process death killed capture/projection. Do not stay "Recording" with silence.
+            try {
+                if (phase == SessionPhase.Recording || phase == SessionPhase.Paused) {
+                    Log.w(TAG, "sticky restart: force-pause zombie session phase=$phase")
+                    controller.pause()
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "sticky restart pause failed", e)
+            }
+            try {
+                releaseProjection()
+            } catch (e: Exception) {
+                Log.w(TAG, "sticky restart releaseProjection failed", e)
+            }
             try {
                 refreshLocalNotification(controller)
             } catch (_: Exception) {

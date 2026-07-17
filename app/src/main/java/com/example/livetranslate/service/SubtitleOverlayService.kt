@@ -63,6 +63,8 @@ class SubtitleOverlayService : Service() {
     private var overlaySettings: UserSettings = UserSettings()
     /** Last applied layout mode; reset scroll controller only when this changes. */
     private var lastLayoutMode: OverlayLayoutMode? = null
+    /** Latest session snapshot for layout-switch catch-up (avoid full replay). */
+    private var lastSessionState: LiveSessionUiState = LiveSessionUiState()
     private val scrollController = OverlayScrollController(
         onShow = { cap -> showCaption(cap, isUpdate = false) },
         onBacklog = { depth -> applyCatchUpSpeed(depth) },
@@ -236,12 +238,15 @@ class SubtitleOverlayService : Service() {
         captionJob = scope.launch {
             try {
                 controller.state.collect { st ->
-                    if (st.phase == SessionPhase.Idle && st.segments.isEmpty()) {
+                    lastSessionState = st
+                    if (st.phase == SessionPhase.Idle) {
+                        // Always reset controller on Idle (including save-failed with segments).
                         scrollController.reset()
                         pendingLineFinishes = 0
                         lastShownEn = ""
                         lastShownZh = ""
                         idleBlankedFingerprint = null
+                        emptyAdvanceDepth = 0
                         cancelIdleBlankTimer()
                         clearOverlayTextOnly()
                     }
@@ -253,12 +258,16 @@ class SubtitleOverlayService : Service() {
                     }
                     when (layout) {
                         OverlayLayoutMode.ScrollLine -> {
-                            // Committed segments only; queue + finish-before-next
-                            scrollController.onState(st, overlaySettings)
+                            if (st.phase != SessionPhase.Idle) {
+                                // Committed segments only; queue + finish-before-next
+                                scrollController.onState(st, overlaySettings)
+                            }
                         }
                         OverlayLayoutMode.FullSentence -> {
-                            val cap = st.toOverlayCaption(overlaySettings)
-                            showCaptionImmediate(cap)
+                            if (st.phase != SessionPhase.Idle) {
+                                val cap = st.toOverlayCaption(overlaySettings)
+                                showCaptionImmediate(cap)
+                            }
                         }
                     }
                 }
@@ -269,7 +278,8 @@ class SubtitleOverlayService : Service() {
     }
 
     private fun onLayoutModeChanged(newLayout: OverlayLayoutMode) {
-        scrollController.reset()
+        // Mark existing segments seen so we do not re-marquee the whole session.
+        scrollController.resetCatchUp(lastSessionState.segments)
         pendingLineFinishes = 0
         lastShownEn = ""
         lastShownZh = ""
@@ -278,6 +288,34 @@ class SubtitleOverlayService : Service() {
         cancelIdleBlankTimer()
         clearOverlayTextOnly()
         lastLayoutMode = newLayout
+        // Show only the latest line immediately (FullSentence or as ScrollLine seed).
+        if (lastSessionState.phase != SessionPhase.Idle) {
+            val cap = lastSessionState.toOverlayCaption(overlaySettings)
+            when (newLayout) {
+                OverlayLayoutMode.FullSentence -> showCaptionImmediate(cap)
+                OverlayLayoutMode.ScrollLine -> {
+                    if (cap.en.isNotBlank() || cap.zh.isNotBlank()) {
+                        showCaption(
+                            OverlayScrollController.OverlayCaption(cap.en, cap.zh),
+                            isUpdate = false
+                        )
+                    }
+                }
+            }
+        }
+    }
+
+    /**
+     * Before reparenting caption views (stack/mode change), cancel marquees so
+     * finish counters do not stall the ScrollLine queue.
+     */
+    private fun interruptScrollLineForChromeChange() {
+        if (overlaySettings.overlayLayoutModeEnum() != OverlayLayoutMode.ScrollLine) return
+        if (pendingLineFinishes <= 0 && lastShownEn.isEmpty() && lastShownZh.isEmpty()) return
+        enView?.cancelScroll()
+        zhView?.cancelScroll()
+        pendingLineFinishes = 0
+        scrollController.notifyDisplayCleared()
     }
 
     private fun showCaption(
@@ -538,6 +576,8 @@ class SubtitleOverlayService : Service() {
         val density = resources.displayMetrics.density
         val mode = s.overlayTextModeEnum()
 
+        // removeAllViews detaches children and cancels marquee without finish callbacks.
+        interruptScrollLineForChromeChange()
         p.removeAllViews()
         when (mode) {
             OverlayTextMode.SourceOnly -> {

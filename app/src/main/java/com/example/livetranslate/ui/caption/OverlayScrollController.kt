@@ -65,6 +65,23 @@ class OverlayScrollController(
     }
 
     /**
+     * After layout switch: drop queue/display state but mark existing segments as
+     * already seen so [onState] does not re-play the entire lecture.
+     */
+    fun resetCatchUp(segments: List<TranscriptSegment>) {
+        queue.clear()
+        held.clear()
+        currentId = null
+        currentEn = ""
+        currentZh = ""
+        scrolling = false
+        seenIds.clear()
+        for (seg in segments) {
+            if (seg.localId != 0L) seenIds.add(seg.localId)
+        }
+    }
+
+    /**
      * Overlay display was cleared externally (e.g. idle blank). Drop "currently
      * scrolling" so the next queued caption can show, without wiping the queue.
      */
@@ -88,14 +105,13 @@ class OverlayScrollController(
             if (seg.source.isBlank() && seg.translation.isBlank()) continue
             val en = mapEn(seg, mode)
             val zh = mapZh(seg, mode, asrOnly)
+            // Skip captions that map to nothing for the current text mode
+            if (en.isBlank() && zh.isBlank()) {
+                if (seg.localId !in seenIds) seenIds.add(seg.localId)
+                continue
+            }
             if (seg.localId !in seenIds) {
                 seenIds.add(seg.localId)
-                // Bound memory for long sessions
-                while (seenIds.size > 200) {
-                    val first = seenIds.first()
-                    seenIds.remove(first)
-                    held.remove(first)
-                }
                 if (holdForZh && !isTranslationReady(seg, zh)) {
                     held[seg.localId] = Queued(seg.localId, en, zh, seg.timestampMs)
                     continue
@@ -133,11 +149,26 @@ class OverlayScrollController(
                 }
             }
         }
+        pruneSeenIds(state.segments)
         tryShowNext()
         // Next sentence recognized while current is still scrolling → catch up
         if (finishBeforeNext && scrolling && newlyEnqueued > 0 && queue.isNotEmpty()) {
             onBacklog(queue.size)
         }
+    }
+
+    /**
+     * Bound [seenIds] without re-introducing long-session replay: only drop IDs that
+     * are no longer in the active segment list / hold / queue / current caption.
+     */
+    private fun pruneSeenIds(segments: List<TranscriptSegment>) {
+        if (seenIds.size <= SEEN_SOFT_CAP) return
+        val keep = HashSet<Long>(segments.size + held.size + queue.size + 4)
+        for (seg in segments) keep.add(seg.localId)
+        keep.addAll(held.keys)
+        for (q in queue) keep.add(q.id)
+        currentId?.let { keep.add(it) }
+        seenIds.retainAll(keep)
     }
 
     /** Called when both caption lines finished their marquee/dwell. */
@@ -212,5 +243,8 @@ class OverlayScrollController(
             if (!seg.incomplete) return true
             return false
         }
+
+        /** Start pruning [seenIds] only above this size. */
+        private const val SEEN_SOFT_CAP = 400
     }
 }

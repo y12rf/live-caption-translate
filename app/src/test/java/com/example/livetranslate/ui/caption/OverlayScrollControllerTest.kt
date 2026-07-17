@@ -180,6 +180,34 @@ class OverlayScrollControllerTest {
     }
 
     @Test
+    fun resetCatchUp_doesNotReplayExistingSegments() {
+        val shown = mutableListOf<OverlayScrollController.OverlayCaption>()
+        val c = OverlayScrollController(onShow = { shown.add(it) })
+        val s = UserSettings()
+        val segs = listOf(seg(1, "a", "A"), seg(2, "b", "B"), seg(3, "c", "C"))
+        c.resetCatchUp(segs)
+        c.onState(state(*segs.toTypedArray()), s)
+        assertEquals(0, shown.size)
+
+        // Only brand-new id enqueues
+        c.onState(state(*(segs + seg(4, "d", "D")).toTypedArray()), s)
+        assertEquals(1, shown.size)
+        assertEquals("d", shown[0].en)
+    }
+
+    @Test
+    fun skipsBothBlankAfterModeMap() {
+        val shown = mutableListOf<OverlayScrollController.OverlayCaption>()
+        val c = OverlayScrollController(onShow = { shown.add(it) })
+        // SourceOnly maps ZH away; blank EN skipped earlier — use TranslationOnly empty
+        val s = UserSettings(overlayTextMode = OverlayTextMode.TranslationOnly.name)
+        c.onState(state(seg(1, "hello", "", incomplete = true)), s)
+        // Held until ready; fail stamp with still empty ZH → maps to blank/blank → not shown
+        c.onState(state(seg(1, "hello", "", incomplete = true, stamp = 2000L)), s)
+        assertEquals(0, shown.size)
+    }
+
+    @Test
     fun notifyDisplayCleared_showsNextQueued() {
         val shown = mutableListOf<OverlayScrollController.OverlayCaption>()
         val c = OverlayScrollController(onShow = { shown.add(it) })

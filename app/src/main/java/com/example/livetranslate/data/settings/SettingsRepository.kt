@@ -73,7 +73,10 @@ class SettingsRepository(private val context: Context) {
         val liveFontSizeSp = intPreferencesKey("live_font_size_sp")
     }
 
-    val settings: Flow<UserSettings> = context.dataStore.data.map { p -> read(p) }
+    val settings: Flow<UserSettings> = context.dataStore.data.map { p ->
+        // Always expose clamped/normalized values (not only after save).
+        SettingsValidation.validate(read(p)).sanitized
+    }
 
     suspend fun update(transform: (UserSettings) -> UserSettings) {
         context.dataStore.edit { prefs ->

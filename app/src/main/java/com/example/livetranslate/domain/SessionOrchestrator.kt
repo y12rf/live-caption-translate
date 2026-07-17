@@ -1103,6 +1103,8 @@ class SessionOrchestrator(
                     )
                     if (!sent.isSuccess) {
                         llmQueued.decrementAndGet()
+                        val msg = "翻译队列已满"
+                        markSegmentFailed(localId, msg)
                         pushFail(
                             FailedWork.Llm(
                                 id = failIdGen.getAndIncrement(),
@@ -1110,7 +1112,7 @@ class SessionOrchestrator(
                                 en = en,
                                 windowSize = window,
                                 segmentLocalId = localId,
-                                message = "翻译队列已满"
+                                message = msg
                             )
                         )
                     }
@@ -1605,6 +1607,8 @@ class SessionOrchestrator(
             if (result.isFailure) break
             val job = result.getOrNull() ?: break
             llmQueued.decrementAndGet()
+            val msg = "会话结束时翻译未完成"
+            markSegmentFailed(job.segmentLocalId, msg)
             pushFail(
                 FailedWork.Llm(
                     id = failIdGen.getAndIncrement(),
@@ -1612,7 +1616,7 @@ class SessionOrchestrator(
                     en = job.en,
                     windowSize = job.windowSize,
                     segmentLocalId = job.segmentLocalId,
-                    message = "会话结束时翻译未完成"
+                    message = msg
                 )
             )
             llmSalvaged++
