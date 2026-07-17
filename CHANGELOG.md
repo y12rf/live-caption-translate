@@ -10,7 +10,10 @@
 - Background opacity can be **0** (no forced border/divider alpha floor)
 - Home bilingual list always **FullSentence** (independent of overlay layout)
 - Removed duplicate immersive button on the home panel (top-bar fullscreen only)
-- Layout mode switch resets overlay queue only on real mode changes
+- Layout mode switch resets overlay queue only on real mode changes; **catch-up** seeds `seenIds` so history is not re-marquee’d
+- Long sessions: prune `seenIds` safely (no re-enqueue of old segments every tick)
+- Stack/order chrome changes cancel marquee finish counters so the queue cannot stall
+- Empty dual-blank captions (e.g. TranslationOnly + failed ZH) are not enqueued
 
 ### Session / capture
 - `AudioCapture.stopAndJoin` before WAV finalize and MediaProjection release (reduces OEM native crashes on internal audio)
