@@ -97,6 +97,7 @@
     <string name="cache_summary_history">History sessions: %1$d (%2$s)</string>
     <string name="cache_summary_empty">Nothing to clean</string>
     <string name="cache_summary_sep">; </string>
+    <string name="cache_blocked_session_active">A recording or import session is active. Stop it before clearing cache or history.</string>
 
     <!-- Network / weak net -->
     <string name="net_offline">Offline — keep recording; upload resumes when online</string>

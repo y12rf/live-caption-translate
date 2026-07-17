@@ -89,12 +89,17 @@ object CacheCleaner {
 
     /**
      * Delete WAV files under recordings/ that are not linked to any session.
+     *
+     * @param excludePaths absolute paths that must never be deleted (e.g. in-progress session WAV).
      */
-    suspend fun clearOrphanRecordings(context: Context): Result {
+    suspend fun clearOrphanRecordings(
+        context: Context,
+        excludePaths: Set<String> = emptySet()
+    ): Result {
         val app = context.applicationContext
         val dir = recordingsDir(app)
         if (!dir.isDirectory) return Result()
-        val keep = referencedAudioPaths(app)
+        val keep = referencedAudioPaths(app) + normalizeExclude(excludePaths)
         var count = 0
         var bytes = 0L
         dir.listFiles()?.forEach { f ->
@@ -113,9 +118,15 @@ object CacheCleaner {
 
     /**
      * Delete all history sessions + all recording files (including referenced).
+     *
+     * @param excludePaths absolute paths that must never be deleted (e.g. live session still writing).
      */
-    suspend fun clearAllHistoryAndRecordings(context: Context): Result {
+    suspend fun clearAllHistoryAndRecordings(
+        context: Context,
+        excludePaths: Set<String> = emptySet()
+    ): Result {
         val app = context.applicationContext
+        val protected = normalizeExclude(excludePaths)
         val dao = AppDatabase.get(app).sessionDao()
         val paths = dao.allAudioPaths()
         val sessionCount = dao.sessionCount()
@@ -126,6 +137,7 @@ object CacheCleaner {
         var files = 0
         paths.forEach { p ->
             if (p.isNullOrBlank()) return@forEach
+            if (p in protected) return@forEach
             val f = File(p)
             if (f.isFile) {
                 val len = f.length()
@@ -135,14 +147,14 @@ object CacheCleaner {
                 }
             }
         }
-        // Sweep leftovers in recordings dir
+        // Sweep leftovers in recordings dir (skip protected active session files)
         recordingsDir(app).listFiles()?.forEach { f ->
-            if (f.isFile) {
-                val len = f.length()
-                if (f.delete()) {
-                    files++
-                    bytes += len
-                }
+            if (!f.isFile) return@forEach
+            if (f.absolutePath in protected) return@forEach
+            val len = f.length()
+            if (f.delete()) {
+                files++
+                bytes += len
             }
         }
         return Result(
@@ -152,4 +164,7 @@ object CacheCleaner {
             historyBytesFreed = 0L // counted in orphanBytes for simplicity
         )
     }
+
+    private fun normalizeExclude(paths: Set<String>): Set<String> =
+        paths.mapNotNull { it.trim().takeIf { p -> p.isNotEmpty() } }.toSet()
 }

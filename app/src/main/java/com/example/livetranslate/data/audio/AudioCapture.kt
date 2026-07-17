@@ -23,13 +23,13 @@ import com.example.livetranslate.domain.model.UtteranceAudio
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import java.io.File
@@ -47,8 +47,12 @@ class AudioCapture(
     private val settings: () -> UserSettings,
     private val appContext: Context
 ) {
-    private val _utterances = MutableSharedFlow<UtteranceAudio>(extraBufferCapacity = 16)
-    val utterances: SharedFlow<UtteranceAudio> = _utterances.asSharedFlow()
+    /**
+     * Bounded channel (not SharedFlow.tryEmit): full buffer back-pressures the capture
+     * coroutine instead of silently dropping VAD cuts.
+     */
+    private val utteranceChannel = Channel<UtteranceAudio>(capacity = UTTERANCE_CHANNEL_CAP)
+    val utterances: Flow<UtteranceAudio> = utteranceChannel.receiveAsFlow()
 
     private val _captureError = MutableStateFlow<String?>(null)
     val captureError: StateFlow<String?> = _captureError.asStateFlow()
@@ -203,7 +207,9 @@ class AudioCapture(
         if (flush && vad != null) {
             try {
                 vad.flushStop().emit?.let { emit ->
-                    _utterances.tryEmit(
+                    // Sync path (may run on main): trySend only — collector still active until
+                    // orchestrator cancels it after stop returns.
+                    publishUtteranceNonSuspending(
                         UtteranceAudio(emit.pcm, ASR_SAMPLE_RATE, emit.reason)
                     )
                 }
@@ -218,7 +224,7 @@ class AudioCapture(
     }
 
     @SuppressLint("MissingPermission")
-    private fun loopMicrophone() {
+    private suspend fun loopMicrophone() {
         val frameSamples = ASR_SAMPLE_RATE * FRAME_MS / 1000
         val vad = createVad(frameSamples)
         activeVad = vad
@@ -240,10 +246,25 @@ class AudioCapture(
         try {
             ensureRecording(recorder)
             val frame = ShortArray(frameSamples)
+            // Carry partial reads so underruns do not discard audio mid-frame.
+            var residual = ShortArray(0)
             while (running && scope.isActive) {
                 val read = recorder.read(frame, 0, frame.size)
-                if (read != frame.size) continue
-                emitVad(vad, frame)
+                if (read <= 0) {
+                    if (read < 0) Log.w(TAG, "mic read error $read")
+                    continue
+                }
+                val combined = concatShorts(residual, frame, read)
+                var offset = 0
+                while (offset + frameSamples <= combined.size) {
+                    emitVad(vad, combined.copyOfRange(offset, offset + frameSamples))
+                    offset += frameSamples
+                }
+                residual = if (offset < combined.size) {
+                    combined.copyOfRange(offset, combined.size)
+                } else {
+                    ShortArray(0)
+                }
             }
         } finally {
             releaseRecorder(recorder)
@@ -255,7 +276,7 @@ class AudioCapture(
      * Internal playback capture: try device-friendly formats, always feed VAD at 16 kHz mono.
      */
     @SuppressLint("MissingPermission")
-    private fun loopInternal() {
+    private suspend fun loopInternal() {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
             throw IllegalStateException("内部录音需要 Android 10+")
         }
@@ -382,7 +403,7 @@ class AudioCapture(
     }
 
     @SuppressLint("MissingPermission")
-    private fun loopInternalWithFormat(projection: MediaProjection, fmt: CaptureFormat) {
+    private suspend fun loopInternalWithFormat(projection: MediaProjection, fmt: CaptureFormat) {
         // Only usages that the platform allows for playback capture (see AudioPlaybackCapture docs).
         val config = AudioPlaybackCaptureConfiguration.Builder(projection)
             .addMatchingUsage(AudioAttributes.USAGE_MEDIA)
@@ -463,6 +484,8 @@ class AudioCapture(
             ensureRecording(recorder)
             Log.i(TAG, "Internal capture OK @ ${fmt.sampleRate}Hz ch=${fmt.channels}")
             val captureBuf = ShortArray(frameSamplesCapture)
+            // Carry leftover 16 kHz samples across reads so partial frames are not discarded.
+            var residual16k = ShortArray(0)
             while (running && scope.isActive) {
                 val read = recorder.read(captureBuf, 0, captureBuf.size)
                 if (read <= 0) {
@@ -471,12 +494,21 @@ class AudioCapture(
                 }
                 val monoHi = toMono(captureBuf, read, fmt.channels)
                 val mono16k = resampleTo16k(monoHi, fmt.sampleRate)
-                // Feed VAD in 20ms chunks at 16 kHz
+                val combined = if (residual16k.isEmpty()) {
+                    mono16k
+                } else {
+                    concatShorts(residual16k, mono16k, mono16k.size)
+                }
                 var offset = 0
-                while (offset + asrFrameSamples <= mono16k.size) {
-                    val frame = mono16k.copyOfRange(offset, offset + asrFrameSamples)
+                while (offset + asrFrameSamples <= combined.size) {
+                    val frame = combined.copyOfRange(offset, offset + asrFrameSamples)
                     emitVad(vad, frame)
                     offset += asrFrameSamples
+                }
+                residual16k = if (offset < combined.size) {
+                    combined.copyOfRange(offset, combined.size)
+                } else {
+                    ShortArray(0)
                 }
             }
         } finally {
@@ -497,15 +529,36 @@ class AudioCapture(
         )
     }
 
-    private fun emitVad(vad: EnergyVad, frame: ShortArray) {
+    private suspend fun emitVad(vad: EnergyVad, frame: ShortArray) {
         // Full-session archive (silence included) for auto-save / share / export
         sessionRecorder.writeFrame(frame)
         val result = vad.accept(frame)
         result.emit?.let { emit ->
-            _utterances.tryEmit(
-                UtteranceAudio(emit.pcm, ASR_SAMPLE_RATE, emit.reason)
-            )
+            publishUtterance(UtteranceAudio(emit.pcm, ASR_SAMPLE_RATE, emit.reason))
         }
+    }
+
+    /** Capture-loop path: suspends when the utterance channel is full (back-pressure). */
+    private suspend fun publishUtterance(utt: UtteranceAudio) {
+        utteranceChannel.send(utt)
+    }
+
+    /** Stop/flush path: non-suspending; logs if the buffer is already full. */
+    private fun publishUtteranceNonSuspending(utt: UtteranceAudio) {
+        val result = utteranceChannel.trySend(utt)
+        if (!result.isSuccess) {
+            Log.w(TAG, "utterance dropped: channel full on non-suspending publish")
+        }
+    }
+
+    private fun concatShorts(prefix: ShortArray, buf: ShortArray, bufLen: Int): ShortArray {
+        if (prefix.isEmpty()) {
+            return if (bufLen == buf.size) buf else buf.copyOf(bufLen)
+        }
+        val out = ShortArray(prefix.size + bufLen)
+        System.arraycopy(prefix, 0, out, 0, prefix.size)
+        System.arraycopy(buf, 0, out, prefix.size, bufLen)
+        return out
     }
 
     private fun ensureRecording(recorder: AudioRecord) {
@@ -575,6 +628,8 @@ class AudioCapture(
         const val ASR_SAMPLE_RATE = 16_000
         private const val FRAME_MS = 20
         private const val BYTES_PER_SAMPLE = 2
+        /** ~1.2s of max-rate cuts at 20ms VAD; suspends rather than drop when full. */
+        private const val UTTERANCE_CHANNEL_CAP = 64
 
         /** @deprecated use [ASR_SAMPLE_RATE] */
         const val SAMPLE_RATE = ASR_SAMPLE_RATE

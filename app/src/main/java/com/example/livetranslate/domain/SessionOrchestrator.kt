@@ -120,8 +120,10 @@ class SessionOrchestrator(
     private var recordedElapsedMs: Long = 0L
     private var segmentClockStart: Long = 0L
     private val contextWindow = ArrayDeque<ContextTurn>()
+    private val contextLock = Any()
 
     private val failList = ArrayDeque<FailedWork>()
+    private val failLock = Any()
     private val failIdGen = AtomicLong(1)
     private val segmentIdGen = AtomicLong(1)
 
@@ -138,6 +140,11 @@ class SessionOrchestrator(
 
     private val stopOnce = AtomicBoolean(false)
     private val draining = AtomicBoolean(false)
+    /**
+     * User requested pause: keep [SessionPhase.Paused] even while ASR/LLM backlog drains,
+     * so [refreshPhase] / workers do not flip UI back to Processing.
+     */
+    private val userPaused = AtomicBoolean(false)
     /** When true, [stop] must not cancel [fileJob] (file job is driving auto-save). */
     private val suppressFileJobCancel = AtomicBoolean(false)
 
@@ -180,6 +187,7 @@ class SessionOrchestrator(
     fun translationCacheSize(): Int = translationCache.size
 
     fun reportCaptureError(message: String) {
+        userPaused.set(true)
         audio.pause()
         stopTimer()
         _state.update {
@@ -203,14 +211,15 @@ class SessionOrchestrator(
             return
         }
 
+        userPaused.set(false)
         if (current == SessionPhase.Idle) {
             stopOnce.set(false)
             pendingSave = null
             sessionStartedAt = System.currentTimeMillis()
             recordedElapsedMs = 0L
-            contextWindow.clear()
+            clearContextWindow()
             translationCache.clear()
-            failList.clear()
+            clearFailList()
             dropped.set(0)
             resetTitleState()
             audio.sourceType = _state.value.audioSource
@@ -251,6 +260,7 @@ class SessionOrchestrator(
             if (current == SessionPhase.Idle) {
                 audio.discardSessionRecording()
             }
+            userPaused.set(false)
             _state.update {
                 it.copy(
                     phase = SessionPhase.Idle,
@@ -311,12 +321,13 @@ class SessionOrchestrator(
 
     private suspend fun runFileImport(uri: Uri) {
         stopOnce.set(false)
+        userPaused.set(false)
         pendingSave = null
         sessionStartedAt = System.currentTimeMillis()
         recordedElapsedMs = 0L
-        contextWindow.clear()
+        clearContextWindow()
         translationCache.clear()
-        failList.clear()
+        clearFailList()
         dropped.set(0)
         resetTitleState()
         audio.sourceType = AudioSourceType.File
@@ -462,6 +473,7 @@ class SessionOrchestrator(
             // Offline file feed has no mic pause; user can Stop.
             return
         }
+        userPaused.set(true)
         accumulateElapsed()
         audio.pause()
         stopTimer()
@@ -475,7 +487,7 @@ class SessionOrchestrator(
 
     /**
      * @param drain If true, stop capture but wait for in-memory queues (up to [DRAIN_TIMEOUT_MS])
-     *              before cancelling workers. Disk queue is left for next session unless empty.
+     *              before cancelling workers. Non-empty disk overflow is kept for the next session.
      */
     fun stop(drain: Boolean = true) {
         if (!stopOnce.compareAndSet(false, true)) return
@@ -489,6 +501,7 @@ class SessionOrchestrator(
             return
         }
 
+        userPaused.set(false)
         // Cancel in-flight FFmpeg / file segmentation unless file job itself is calling stop.
         if (!suppressFileJobCancel.get()) {
             fileJob?.cancel()
@@ -531,6 +544,9 @@ class SessionOrchestrator(
                         android.util.Log.w(TAG, "drain timeout; cancelling workers")
                     }
                 }
+
+                // Park leftover queue items before tearing down workers/channels.
+                salvageOpenQueuesToDiskOrFail()
 
                 asrWorker?.cancel()
                 asrWorker = null
@@ -576,6 +592,7 @@ class SessionOrchestrator(
                     } catch (e: Exception) {
                         android.util.Log.e(TAG, "saveSession failed", e)
                         pendingSave = PendingSave(started, segs, audioPath, title, snapshot.overlayEnabled)
+                        val failCount = synchronized(failLock) { failList.size }
                         _state.update {
                             it.copy(
                                 phase = SessionPhase.Idle,
@@ -587,7 +604,7 @@ class SessionOrchestrator(
                                 asrQueueDepth = 0,
                                 llmQueueDepth = 0,
                                 diskQueueDepth = diskQueue.size(),
-                                failedCount = failList.size,
+                                failedCount = failCount,
                                 sessionStartedAt = started,
                                 segments = segs,
                                 cumulativeEn = snapshot.cumulativeEn,
@@ -639,7 +656,7 @@ class SessionOrchestrator(
     fun retryAllFailed() = retryFailed(limit = Int.MAX_VALUE)
 
     fun dismissFailures() {
-        failList.clear()
+        clearFailList()
         publishFailState(error = null)
     }
 
@@ -761,12 +778,16 @@ class SessionOrchestrator(
     }
 
     private fun retryFailed(limit: Int) {
-        if (failList.isEmpty()) return
+        if (limit <= 0) return
         ensureWorkers()
         val batch = ArrayList<FailedWork>()
-        repeat(minOf(limit, failList.size)) {
-            failList.removeFirstOrNull()?.let { batch.add(it) }
+        synchronized(failLock) {
+            if (failList.isEmpty()) return
+            repeat(minOf(limit, failList.size)) {
+                failList.removeFirstOrNull()?.let { batch.add(it) }
+            }
         }
+        if (batch.isEmpty()) return
         publishFailState(error = null)
         scope.launch {
             for (item in batch) {
@@ -803,10 +824,11 @@ class SessionOrchestrator(
 
     private fun autoRetryFailedIfOnline() {
         if (!network.isOnline()) return
-        if (failList.isEmpty()) return
+        val n = synchronized(failLock) { failList.size }
+        if (n == 0) return
         val phase = _state.value.phase
         if (phase == SessionPhase.Idle && !draining.get()) return
-        retryFailed(limit = failList.size)
+        retryFailed(limit = n)
     }
 
     // --- workers ---
@@ -832,6 +854,11 @@ class SessionOrchestrator(
         }
     }
 
+    /**
+     * True while workers still have processable work.
+     * Disk overflow is only "busy" when online (can be pumped); offline disk is preserved
+     * across stop and must not block drain forever or be wiped on finalize.
+     */
     private fun pipelineBusy(): Boolean =
         asrInFlight.get() > 0 ||
             llmInFlight.get() > 0 ||
@@ -844,6 +871,11 @@ class SessionOrchestrator(
             _state.update { it.copy(phase = SessionPhase.Processing, draining = true) }
             return
         }
+        // User pause wins over backlog so notification/UI stay on Pause while queues drain.
+        if (userPaused.get()) {
+            _state.update { it.copy(phase = SessionPhase.Paused, draining = false) }
+            return
+        }
         val phase = when {
             pipelineBusy() -> SessionPhase.Processing
             audio.isRecording -> SessionPhase.Recording
@@ -852,6 +884,10 @@ class SessionOrchestrator(
         }
         _state.update { it.copy(phase = phase, draining = false) }
     }
+
+    /** Prefer Paused while [userPaused]; used when workers start a job. */
+    private fun phaseForWork(): SessionPhase =
+        if (userPaused.get()) SessionPhase.Paused else SessionPhase.Processing
 
     private suspend fun awaitOnline(tag: String) {
         if (network.isOnline()) return
@@ -869,7 +905,7 @@ class SessionOrchestrator(
         asrInFlight.incrementAndGet()
         _state.update {
             it.copy(
-                phase = SessionPhase.Processing,
+                phase = phaseForWork(),
                 partialEn = "",
                 lastCutReason = utt.reason,
                 error = null
@@ -956,7 +992,7 @@ class SessionOrchestrator(
         llmInFlight.incrementAndGet()
         _state.update {
             it.copy(
-                phase = SessionPhase.Processing,
+                phase = phaseForWork(),
                 partialZh = "",
                 error = null
             )
@@ -1084,7 +1120,7 @@ class SessionOrchestrator(
         } else {
             settings.contextWindowSize
         }
-        val ctx = contextWindow.toList().takeLast(windowSize.coerceAtLeast(0))
+        val ctx = snapshotContextWindow(windowSize.coerceAtLeast(0))
         llm.translateStream(
             en,
             ctx,
@@ -1124,7 +1160,22 @@ class SessionOrchestrator(
         }
 
         zh = LlmClient.stripThinkingArtifacts(zh)
-        if (cacheKey != null && zh.isNotBlank()) {
+        if (zh.isBlank()) {
+            // Align with offline SoftZh.Incomplete: empty translation is not "done".
+            finishTranslation(job, en, "", incomplete = true)
+            pushFail(
+                FailedWork.Llm(
+                    id = failIdGen.getAndIncrement(),
+                    utt = job.utt,
+                    en = en,
+                    windowSize = job.windowSize,
+                    segmentLocalId = job.segmentLocalId,
+                    message = "翻译结果为空"
+                )
+            )
+            return
+        }
+        if (cacheKey != null) {
             translationCache.put(cacheKey, zh)
         }
         finishTranslation(job, en, zh, incomplete = false)
@@ -1132,8 +1183,7 @@ class SessionOrchestrator(
 
     /** Mark segment complete without translation (ASR-only mode). */
     private fun finishAsrOnly(segmentLocalId: Long, en: String) {
-        contextWindow.addLast(ContextTurn(en, ""))
-        while (contextWindow.size > 8) contextWindow.removeFirst()
+        pushContextTurn(ContextTurn(en, ""), maxSize = 8)
 
         _state.update { st ->
             val segs = st.segments.map { s ->
@@ -1189,10 +1239,7 @@ class SessionOrchestrator(
         zh: String,
         incomplete: Boolean
     ) {
-        contextWindow.addLast(ContextTurn(en, zh))
-        while (contextWindow.size > job.windowSize.coerceAtLeast(0)) {
-            contextWindow.removeFirst()
-        }
+        pushContextTurn(ContextTurn(en, zh), maxSize = job.windowSize.coerceAtLeast(0))
 
         var turnCount = 0
         _state.update { st ->
@@ -1297,22 +1344,31 @@ class SessionOrchestrator(
     }
 
     private fun pushFail(item: FailedWork) {
-        synchronized(failList) {
+        synchronized(failLock) {
             while (failList.size >= MAX_FAIL_LIST) failList.removeFirst()
             failList.addLast(item)
         }
         publishFailState(error = item.message)
     }
 
+    private fun clearFailList() {
+        synchronized(failLock) {
+            failList.clear()
+        }
+    }
+
     private fun publishFailState(error: String?) {
-        val preview = failList.lastOrNull()?.let {
-            "${it.stage.name}: ${it.message.take(80)}"
+        val (count, preview, canRetry) = synchronized(failLock) {
+            val p = failList.lastOrNull()?.let {
+                "${it.stage.name}: ${it.message.take(80)}"
+            }
+            Triple(failList.size, p, failList.isNotEmpty())
         }
         _state.update {
             it.copy(
-                failedCount = failList.size,
+                failedCount = count,
                 failedPreview = preview,
-                canRetry = failList.isNotEmpty(),
+                canRetry = canRetry,
                 error = error ?: it.error
             )
         }
@@ -1330,29 +1386,110 @@ class SessionOrchestrator(
         }
     }
 
-    private fun finalizeIdle(overlayEnabled: Boolean, clearFail: Boolean) {
-        if (clearFail) {
-            failList.clear()
-            // Avoid leaking previous session PCM into the next lecture.
+    /**
+     * Move remaining in-memory ASR/LLM work off closed channels so stop does not drop it.
+     * ASR → disk overflow; LLM → fail list (segments already ASR-committed as incomplete).
+     */
+    private fun salvageOpenQueuesToDiskOrFail() {
+        var asrSalvaged = 0
+        while (true) {
+            val result = utteranceQueue.tryReceive()
+            if (result.isFailure) break
+            val utt = result.getOrNull() ?: break
+            asrQueued.decrementAndGet()
             try {
-                diskQueue.clear()
-            } catch (_: Exception) {
+                diskQueue.enqueue(utt)
+                asrSalvaged++
+            } catch (e: Exception) {
+                dropped.incrementAndGet()
+                android.util.Log.w(TAG, "salvage ASR→disk failed", e)
             }
         }
-        contextWindow.clear()
+        var llmSalvaged = 0
+        while (true) {
+            val result = translateQueue.tryReceive()
+            if (result.isFailure) break
+            val job = result.getOrNull() ?: break
+            llmQueued.decrementAndGet()
+            pushFail(
+                FailedWork.Llm(
+                    id = failIdGen.getAndIncrement(),
+                    utt = job.utt,
+                    en = job.en,
+                    windowSize = job.windowSize,
+                    segmentLocalId = job.segmentLocalId,
+                    message = "会话结束时翻译未完成"
+                )
+            )
+            llmSalvaged++
+        }
+        if (asrSalvaged > 0 || llmSalvaged > 0) {
+            android.util.Log.i(
+                TAG,
+                "salvaged on stop: asr→disk=$asrSalvaged llm→fail=$llmSalvaged disk=${diskQueue.size()}"
+            )
+            publishQueueDepths()
+        }
+    }
+
+    private fun snapshotContextWindow(takeLast: Int): List<ContextTurn> =
+        synchronized(contextLock) {
+            if (takeLast <= 0) emptyList()
+            else contextWindow.toList().takeLast(takeLast)
+        }
+
+    private fun pushContextTurn(turn: ContextTurn, maxSize: Int) {
+        synchronized(contextLock) {
+            contextWindow.addLast(turn)
+            val cap = maxSize.coerceAtLeast(0)
+            while (contextWindow.size > cap) {
+                contextWindow.removeFirst()
+            }
+        }
+    }
+
+    private fun clearContextWindow() {
+        synchronized(contextLock) {
+            contextWindow.clear()
+        }
+    }
+
+    private fun finalizeIdle(overlayEnabled: Boolean, clearFail: Boolean) {
+        userPaused.set(false)
+        val diskDepth = try {
+            diskQueue.size()
+        } catch (_: Exception) {
+            0
+        }
+        // Never wipe non-empty disk overflow — next session / pump recovers offline backlog.
+        // (Previously clearFail always diskQueue.clear(), contradicting stop KDoc.)
+        if (clearFail && diskDepth == 0) {
+            clearFailList()
+        } else if (clearFail && diskDepth > 0) {
+            // Keep fail list too when PCM is parked offline so user can retry after reconnect.
+            android.util.Log.i(TAG, "finalizeIdle: keeping disk queue ($diskDepth) and fail list")
+        }
+        clearContextWindow()
         translationCache.clear()
         resetTitleState()
         sessionStartedAt = 0L
         recordedElapsedMs = 0L
+        val (failCount, failPreview, canRetry) = synchronized(failLock) {
+            Triple(
+                failList.size,
+                failList.lastOrNull()?.message,
+                failList.isNotEmpty()
+            )
+        }
         _state.value = LiveSessionUiState(
             phase = SessionPhase.Idle,
             audioSource = audio.sourceType,
             overlayEnabled = overlayEnabled,
             networkOnline = network.isOnline(),
-            diskQueueDepth = diskQueue.size(),
-            failedCount = failList.size,
-            canRetry = failList.isNotEmpty(),
-            failedPreview = failList.lastOrNull()?.message
+            diskQueueDepth = diskDepth,
+            failedCount = failCount,
+            canRetry = canRetry,
+            failedPreview = failPreview
         )
     }
 

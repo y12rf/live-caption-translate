@@ -90,6 +90,7 @@
     <string name="cache_summary_history">历史 %1$d 场（%2$s）</string>
     <string name="cache_summary_empty">没有可清理的内容</string>
     <string name="cache_summary_sep">；</string>
+    <string name="cache_blocked_session_active">当前有录音或文件导入会话进行中，请先停止后再清理缓存/历史。</string>
 
     <string name="net_offline">离线 — 继续录音，恢复网络后自动补传</string>
     <string name="net_backlog">队列 ASR %1$d · 译 %2$d · 磁盘 %3$d</string>

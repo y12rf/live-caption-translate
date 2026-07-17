@@ -5,6 +5,7 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
+import com.example.livetranslate.R
 import com.example.livetranslate.data.CacheCleaner
 import com.example.livetranslate.data.network.ApiLatencyProbe
 import com.example.livetranslate.data.settings.SettingsRepository
@@ -139,11 +140,21 @@ class SettingsViewModel(
     /** Clear in-session translation cache + orphan WAV files (history kept). */
     fun clearCache() {
         if (_ui.value.cacheBusy) return
+        if (sessionController.isSessionBusy() || sessionController.isSessionRecordingActive()) {
+            _ui.update {
+                it.copy(
+                    cacheMessage = getApplication<Application>()
+                        .getString(R.string.cache_blocked_session_active)
+                )
+            }
+            return
+        }
         viewModelScope.launch {
             _ui.update { it.copy(cacheBusy = true, cacheMessage = null) }
             sessionController.clearTranslationCache()
+            val exclude = protectedSessionPaths()
             val r = withContext(Dispatchers.IO) {
-                CacheCleaner.clearOrphanRecordings(getApplication())
+                CacheCleaner.clearOrphanRecordings(getApplication(), excludePaths = exclude)
             }.copy(translationCacheCleared = true)
             _ui.update {
                 it.copy(cacheBusy = false, cacheMessage = r.summary(getApplication()))
@@ -154,17 +165,33 @@ class SettingsViewModel(
     /** Wipe all history sessions and recordings (destructive). */
     fun clearAllHistory() {
         if (_ui.value.cacheBusy) return
+        if (sessionController.isSessionBusy() || sessionController.isSessionRecordingActive()) {
+            _ui.update {
+                it.copy(
+                    cacheMessage = getApplication<Application>()
+                        .getString(R.string.cache_blocked_session_active)
+                )
+            }
+            return
+        }
         viewModelScope.launch {
             _ui.update { it.copy(cacheBusy = true, cacheMessage = null) }
             sessionController.clearTranslationCache()
+            val exclude = protectedSessionPaths()
             val r = withContext(Dispatchers.IO) {
-                CacheCleaner.clearAllHistoryAndRecordings(getApplication())
+                CacheCleaner.clearAllHistoryAndRecordings(getApplication(), excludePaths = exclude)
             }.copy(translationCacheCleared = true)
             _ui.update {
                 it.copy(cacheBusy = false, cacheMessage = r.summary(getApplication()))
             }
         }
     }
+
+    /** Active session WAV must never be deleted mid-recording / mid-import. */
+    private fun protectedSessionPaths(): Set<String> =
+        buildSet {
+            sessionController.activeSessionAudioPath()?.let { add(it) }
+        }
 
     class Factory(private val container: AppContainer) : ViewModelProvider.Factory {
         @Suppress("UNCHECKED_CAST")
