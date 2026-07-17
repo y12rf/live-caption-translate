@@ -1,5 +1,6 @@
 package com.example.livetranslate.ui.caption
 
+import com.example.livetranslate.data.settings.OverlayTextMode
 import com.example.livetranslate.data.settings.UserSettings
 import com.example.livetranslate.domain.LiveSessionUiState
 import com.example.livetranslate.domain.model.CutReason
@@ -122,11 +123,190 @@ class OverlayScrollControllerTest {
         assertEquals(4f, OverlayScrollController.catchUpMultiplier(5), 0.01f)
     }
 
-    private fun seg(id: Long, en: String, zh: String) = TranscriptSegment(
+    @Test
+    fun holdsIncompleteUntilTranslationArrives_bothMode() {
+        val shown = mutableListOf<OverlayScrollController.OverlayCaption>()
+        val c = OverlayScrollController(onShow = { shown.add(it) })
+        c.finishBeforeNext = true
+        val s = UserSettings(overlayTextMode = OverlayTextMode.Both.name)
+
+        // ASR first: incomplete, empty ZH → held, not shown
+        c.onState(state(seg(1, "hello", "", incomplete = true)), s)
+        assertEquals(0, shown.size)
+        assertEquals(0, c.pendingCount)
+
+        // LLM done → released with both lines
+        c.onState(state(seg(1, "hello", "你好", incomplete = false)), s)
+        assertEquals(1, shown.size)
+        assertEquals("hello", shown[0].en)
+        assertEquals("你好", shown[0].zh)
+    }
+
+    @Test
+    fun releasesHeldWhenFinalizedEmptyTranslation() {
+        val shown = mutableListOf<OverlayScrollController.OverlayCaption>()
+        val c = OverlayScrollController(onShow = { shown.add(it) })
+        val s = UserSettings(overlayTextMode = OverlayTextMode.Both.name)
+
+        c.onState(state(seg(1, "uh", "", incomplete = true)), s)
+        assertEquals(0, shown.size)
+
+        // Filler skipped: incomplete=false, empty ZH — still show source
+        c.onState(state(seg(1, "uh", "", incomplete = false)), s)
+        assertEquals(1, shown.size)
+        assertEquals("uh", shown[0].en)
+        assertEquals("", shown[0].zh)
+    }
+
+    @Test
+    fun releasesHeldOnFailedTranslation_stampBump() {
+        // markSegmentFailed keeps incomplete=true / empty ZH but bumps timestampMs
+        val shown = mutableListOf<OverlayScrollController.OverlayCaption>()
+        val c = OverlayScrollController(onShow = { shown.add(it) })
+        val s = UserSettings(overlayTextMode = OverlayTextMode.Both.name)
+
+        c.onState(state(seg(1, "hello", "", incomplete = true, stamp = 1000L)), s)
+        assertEquals(0, shown.size)
+
+        // Unrelated state re-emit (same stamp) must NOT release early
+        c.onState(state(seg(1, "hello", "", incomplete = true, stamp = 1000L)), s)
+        assertEquals(0, shown.size)
+
+        // Fail path: same text, bumped stamp → release source-only caption
+        c.onState(state(seg(1, "hello", "", incomplete = true, stamp = 2000L)), s)
+        assertEquals(1, shown.size)
+        assertEquals("hello", shown[0].en)
+        assertEquals("", shown[0].zh)
+    }
+
+    @Test
+    fun notifyDisplayCleared_showsNextQueued() {
+        val shown = mutableListOf<OverlayScrollController.OverlayCaption>()
+        val c = OverlayScrollController(onShow = { shown.add(it) })
+        c.finishBeforeNext = true
+        val s = UserSettings()
+
+        c.onState(state(seg(1, "a", "A"), seg(2, "b", "B")), s)
+        assertEquals(1, shown.size)
+        assertEquals("a", shown[0].en)
+        assertEquals(1, c.pendingCount)
+
+        // Idle blank path: drop current mid-scroll, advance queue
+        c.notifyDisplayCleared()
+        assertEquals(2, shown.size)
+        assertEquals("b", shown[1].en)
+        assertEquals(0, c.pendingCount)
+    }
+
+    @Test
+    fun sourceOnly_doesNotHoldForTranslation() {
+        val shown = mutableListOf<OverlayScrollController.OverlayCaption>()
+        val c = OverlayScrollController(onShow = { shown.add(it) })
+        val s = UserSettings(overlayTextMode = OverlayTextMode.SourceOnly.name)
+
+        c.onState(state(seg(1, "hello", "", incomplete = true)), s)
+        assertEquals(1, shown.size)
+        assertEquals("hello", shown[0].en)
+        assertEquals("", shown[0].zh)
+    }
+
+    @Test
+    fun asrOnly_doesNotHoldForTranslation() {
+        val shown = mutableListOf<OverlayScrollController.OverlayCaption>()
+        val c = OverlayScrollController(onShow = { shown.add(it) })
+        val s = UserSettings(asrOnlyMode = true)
+
+        c.onState(state(seg(1, "hello", "", incomplete = true)), s)
+        assertEquals(1, shown.size)
+        assertEquals("hello", shown[0].en)
+        assertEquals("", shown[0].zh)
+    }
+
+    @Test
+    fun updatesCurrentCaptionWhileScrolling_whenTranslationArrivesLate() {
+        // SourceOnly starts immediately; then switch path: show source-only first
+        // with translation mode that already showed (simulate mid-scroll ZH fill-in
+        // after hold was not used — e.g. SourceOnly→Both won't apply).
+        // Direct path: enqueue ready segment, then onUpdate when same id changes.
+        val shown = mutableListOf<OverlayScrollController.OverlayCaption>()
+        val updated = mutableListOf<OverlayScrollController.OverlayCaption>()
+        val c = OverlayScrollController(
+            onShow = { shown.add(it) },
+            onUpdate = { updated.add(it) }
+        )
+        c.finishBeforeNext = true
+        // SourceOnly so first show is not held
+        val s = UserSettings(overlayTextMode = OverlayTextMode.SourceOnly.name)
+        c.onState(state(seg(1, "hello", "", incomplete = true)), s)
+        assertEquals(1, shown.size)
+        assertTrue(updated.isEmpty())
+
+        // Mode Both with ZH ready while still on current caption
+        val both = UserSettings(overlayTextMode = OverlayTextMode.Both.name)
+        c.onState(state(seg(1, "hello", "你好", incomplete = false)), both)
+        assertEquals(1, updated.size)
+        assertEquals("你好", updated[0].zh)
+        assertEquals("hello", updated[0].en)
+    }
+
+    @Test
+    fun slowLlm_doesNotDropTranslationBehindFastSpeech() {
+        val shown = mutableListOf<OverlayScrollController.OverlayCaption>()
+        val c = OverlayScrollController(onShow = { shown.add(it) })
+        c.finishBeforeNext = true
+        val s = UserSettings(overlayTextMode = OverlayTextMode.Both.name)
+
+        // Two ASR commits before any LLM result
+        c.onState(
+            state(
+                seg(1, "one", "", incomplete = true),
+                seg(2, "two", "", incomplete = true)
+            ),
+            s
+        )
+        assertEquals(0, shown.size)
+
+        // First translation arrives → only first caption shows
+        c.onState(
+            state(
+                seg(1, "one", "一", incomplete = false),
+                seg(2, "two", "", incomplete = true)
+            ),
+            s
+        )
+        assertEquals(1, shown.size)
+        assertEquals("one", shown[0].en)
+        assertEquals("一", shown[0].zh)
+
+        // Second translation arrives while first still scrolling → queued with ZH
+        c.onState(
+            state(
+                seg(1, "one", "一", incomplete = false),
+                seg(2, "two", "二", incomplete = false)
+            ),
+            s
+        )
+        assertEquals(1, shown.size)
+        assertEquals(1, c.pendingCount)
+
+        c.onScrollFinished()
+        assertEquals(2, shown.size)
+        assertEquals("two", shown[1].en)
+        assertEquals("二", shown[1].zh)
+    }
+
+    private fun seg(
+        id: Long,
+        en: String,
+        zh: String,
+        incomplete: Boolean = zh.isBlank(),
+        stamp: Long = id * 1000L
+    ) = TranscriptSegment(
         source = en,
         translation = zh,
         cutReason = CutReason.Silence,
-        incomplete = zh.isBlank(),
+        incomplete = incomplete,
+        timestampMs = stamp,
         localId = id
     )
 

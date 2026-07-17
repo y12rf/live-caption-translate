@@ -34,6 +34,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeoutOrNull
 import java.io.File
 import kotlin.math.max
 
@@ -205,6 +206,11 @@ class AudioCapture(
         // Do not release VirtualDisplay / MediaProjection — resume reuses the same token.
     }
 
+    /**
+     * Request capture stop (cancel IO job). Prefer [stopAndJoin] before releasing
+     * MediaProjection or finalizing the session WAV — otherwise internal-audio
+     * AudioRecord / VirtualDisplay teardown races cause intermittent native crashes.
+     */
     fun stop(flush: Boolean = true) {
         running = false
         isRecording = false
@@ -223,11 +229,40 @@ class AudioCapture(
             } catch (_: Exception) {
             }
         }
-        job?.cancel()
+        val j = job
         job = null
+        j?.cancel()
         releaseVad(vad)
         activeVad = null
+        pendingJoinJob = j
         // MediaProjection is stopped by RecordingService; display released via mediaProjection=null.
+    }
+
+    /** Job cancelled by the latest [stop]/ null if already idle. */
+    @Volatile
+    private var pendingJoinJob: Job? = null
+
+    /**
+     * Cancel capture and wait until the IO loop has released AudioRecord / left finally.
+     * Must run before [finishSessionRecording] and before MediaProjection.stop().
+     */
+    suspend fun stopAndJoin(flush: Boolean = true, timeoutMs: Long = STOP_JOIN_TIMEOUT_MS) {
+        stop(flush)
+        val j = pendingJoinJob
+        pendingJoinJob = null
+        if (j != null) {
+            val joined = withTimeoutOrNull(timeoutMs) {
+                j.join()
+                true
+            }
+            if (joined != true) {
+                Log.w(TAG, "stopAndJoin: capture job did not finish within ${timeoutMs}ms")
+            }
+        }
+        // Extra beat so OEM audio HAL can drop playback-capture clients before projection stop.
+        if (sourceType == AudioSourceType.Internal) {
+            delay(CAPTURE_RELEASE_GAP_MS)
+        }
     }
 
     @SuppressLint("MissingPermission")
@@ -659,6 +694,10 @@ class AudioCapture(
         private const val BYTES_PER_SAMPLE = 2
         /** Bounded utterance queue; suspends rather than drop when full. */
         private const val UTTERANCE_CHANNEL_CAP = 64
+        /** Wait for capture IO finally (AudioRecord.release) before projection teardown. */
+        private const val STOP_JOIN_TIMEOUT_MS = 2_500L
+        /** Brief HAL settle after internal capture ends (OEM MediaProjection races). */
+        private const val CAPTURE_RELEASE_GAP_MS = 80L
 
         /** @deprecated use [ASR_SAMPLE_RATE] */
         const val SAMPLE_RATE = ASR_SAMPLE_RATE

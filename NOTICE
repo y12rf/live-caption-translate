@@ -1,0 +1,18 @@
+Live Translate
+Copyright (c) 2026 Live Translate contributors
+
+This product includes third-party software:
+
+### android-vad (Silero)
+- Used for on-device voice activity detection.
+- See the dependency’s upstream license (via Gradle).
+
+### FFmpeg (via ffmpeg-kit / native libraries as integrated by the project)
+- Used for file import audio conversion.
+- FFmpeg is licensed under LGPL/GPL depending on build configuration of the bundled kit.
+- Review the FFmpeg / ffmpeg-kit licenses before redistributing binaries commercially.
+
+### AndroidX, OkHttp, Kotlin, Room, Compose
+- Licensed under their respective open-source licenses (typically Apache 2.0).
+
+Full dependency licenses are resolved through Gradle and each upstream project.

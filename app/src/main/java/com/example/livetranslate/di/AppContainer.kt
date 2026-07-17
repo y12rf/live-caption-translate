@@ -9,6 +9,8 @@ import com.example.livetranslate.data.settings.SettingsRepository
 import com.example.livetranslate.domain.OfflineReprocessPipeline
 import com.example.livetranslate.domain.SessionController
 import com.example.livetranslate.domain.model.SessionPhase
+import android.util.Log
+import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -18,7 +20,10 @@ import java.util.concurrent.TimeUnit
 
 class AppContainer(context: Context) {
     val appContext = context.applicationContext
-    val appScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+    private val uncaught = CoroutineExceptionHandler { _, t ->
+        Log.e(TAG, "Uncaught in appScope", t)
+    }
+    val appScope = CoroutineScope(SupervisorJob() + Dispatchers.Default + uncaught)
 
     val settingsRepository = SettingsRepository(appContext)
     val historyRepository = HistoryRepository(appContext)
@@ -72,5 +77,9 @@ class AppContainer(context: Context) {
             }
         }
         sessionController.observeCaptureErrors()
+    }
+
+    companion object {
+        private const val TAG = "LiveTranslate"
     }
 }

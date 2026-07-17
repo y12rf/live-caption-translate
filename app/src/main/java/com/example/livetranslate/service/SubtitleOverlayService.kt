@@ -32,8 +32,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
-import kotlinx.coroutines.flow.distinctUntilChanged
-import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlin.math.abs
 
@@ -42,6 +41,7 @@ import kotlin.math.abs
  *
  * - Rounded corners, configurable size / colors / opacity / font / text mode (Settings)
  * - Layout: full sentence (centered) or single-line marquee
+ * - Clears text after [IDLE_BLANK_MS] with no new caption content
  * - Lock / unlock via **notification** action (not tap on overlay)
  * - Unlocked → drag to reposition; locked → fixed + touch-through
  */
@@ -50,6 +50,7 @@ class SubtitleOverlayService : Service() {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private var captionJob: Job? = null
     private var settingsJob: Job? = null
+    private var idleBlankJob: Job? = null
     private var windowManager: WindowManager? = null
     private var root: FrameLayout? = null
     private var panel: LinearLayout? = null
@@ -60,12 +61,25 @@ class SubtitleOverlayService : Service() {
     private var layoutParams: WindowManager.LayoutParams? = null
 
     private var overlaySettings: UserSettings = UserSettings()
+    /** Last applied layout mode; reset scroll controller only when this changes. */
+    private var lastLayoutMode: OverlayLayoutMode? = null
     private val scrollController = OverlayScrollController(
-        onShow = { cap -> showCaption(cap) },
-        onBacklog = { depth -> applyCatchUpSpeed(depth) }
+        onShow = { cap -> showCaption(cap, isUpdate = false) },
+        onBacklog = { depth -> applyCatchUpSpeed(depth) },
+        onUpdate = { cap -> showCaption(cap, isUpdate = true) }
     )
     /** How many marquee lines still need to finish for the current caption. */
     private var pendingLineFinishes = 0
+    /** Last texts applied to en/zh views (for mid-scroll translation fill-in). */
+    private var lastShownEn: String = ""
+    private var lastShownZh: String = ""
+    /**
+     * Fingerprint of the caption we last idle-blanked. FullSentence re-emits the same
+     * last line on every session tick — without this, blank would immediately re-show.
+     */
+    private var idleBlankedFingerprint: String? = null
+    /** Prevent deep recursion when advancing through empty ScrollLine captions. */
+    private var emptyAdvanceDepth = 0
 
     // Drag state (only when unlocked)
     private var downRawX = 0f
@@ -200,66 +214,145 @@ class SubtitleOverlayService : Service() {
         val settingsRepo = app.container.settingsRepository
 
         settingsJob = scope.launch {
-            settingsRepo.settings.collect { s ->
-                overlaySettings = s
-                scrollController.finishBeforeNext = s.overlayMarqueeFinishBeforeNext
-                applyChrome(s)
-                applyLayoutSize(s)
-                applyStackOrder(s)
-                applyTextStyle(s)
+            try {
+                settingsRepo.settings.collect { s ->
+                    val prevLayout = overlaySettings.overlayLayoutModeEnum()
+                    overlaySettings = s
+                    scrollController.finishBeforeNext = s.overlayMarqueeFinishBeforeNext
+                    val newLayout = s.overlayLayoutModeEnum()
+                    if (lastLayoutMode != null && prevLayout != newLayout) {
+                        onLayoutModeChanged(newLayout)
+                    }
+                    applyChrome(s)
+                    applyLayoutSize(s)
+                    applyStackOrder(s)
+                    applyTextStyle(s)
+                }
+            } catch (e: Exception) {
+                android.util.Log.e(TAG, "settings collect failed", e)
             }
         }
 
         captionJob = scope.launch {
-            controller.state.collect { st ->
-                if (st.phase == SessionPhase.Idle && st.segments.isEmpty()) {
-                    scrollController.reset()
-                    pendingLineFinishes = 0
-                }
-                when (overlaySettings.overlayLayoutModeEnum()) {
-                    OverlayLayoutMode.ScrollLine -> {
-                        // Committed segments only; queue + finish-before-next
-                        scrollController.onState(st, overlaySettings)
-                    }
-                    OverlayLayoutMode.FullSentence -> {
+            try {
+                controller.state.collect { st ->
+                    if (st.phase == SessionPhase.Idle && st.segments.isEmpty()) {
                         scrollController.reset()
-                        val cap = st.toOverlayCaption(overlaySettings)
-                        showCaptionImmediate(cap)
+                        pendingLineFinishes = 0
+                        lastShownEn = ""
+                        lastShownZh = ""
+                        idleBlankedFingerprint = null
+                        cancelIdleBlankTimer()
+                        clearOverlayTextOnly()
+                    }
+                    val layout = overlaySettings.overlayLayoutModeEnum()
+                    if (lastLayoutMode != null && lastLayoutMode != layout) {
+                        onLayoutModeChanged(layout)
+                    } else {
+                        lastLayoutMode = layout
+                    }
+                    when (layout) {
+                        OverlayLayoutMode.ScrollLine -> {
+                            // Committed segments only; queue + finish-before-next
+                            scrollController.onState(st, overlaySettings)
+                        }
+                        OverlayLayoutMode.FullSentence -> {
+                            val cap = st.toOverlayCaption(overlaySettings)
+                            showCaptionImmediate(cap)
+                        }
                     }
                 }
+            } catch (e: Exception) {
+                android.util.Log.e(TAG, "caption collect failed", e)
             }
         }
     }
 
-    private fun showCaption(cap: OverlayScrollController.OverlayCaption) {
+    private fun onLayoutModeChanged(newLayout: OverlayLayoutMode) {
+        scrollController.reset()
+        pendingLineFinishes = 0
+        lastShownEn = ""
+        lastShownZh = ""
+        idleBlankedFingerprint = null
+        emptyAdvanceDepth = 0
+        cancelIdleBlankTimer()
+        clearOverlayTextOnly()
+        lastLayoutMode = newLayout
+    }
+
+    private fun showCaption(
+        cap: OverlayScrollController.OverlayCaption,
+        isUpdate: Boolean
+    ) {
         val layout = overlaySettings.overlayLayoutModeEnum()
         val mode = overlaySettings.overlayTextModeEnum()
         val showEn = mode != OverlayTextMode.TranslationOnly && cap.en.isNotBlank()
         val showZh = mode != OverlayTextMode.SourceOnly &&
             !overlaySettings.asrOnlyMode &&
             cap.zh.isNotBlank()
-        // Start each caption at the user base speed; backlog callback may boost after
-        val baseSpeed = overlaySettings.overlayMarqueeSpeed
-            .coerceIn(20, CaptionLineView.SETTINGS_MAX_SPEED.toInt())
-            .toFloat()
-        enView?.speedPxPerSec = baseSpeed
-        zhView?.speedPxPerSec = baseSpeed
-        // Count lines that will report finish (marquee or dwell)
-        pendingLineFinishes = 0
-        if (layout == OverlayLayoutMode.ScrollLine) {
-            if (showEn) pendingLineFinishes++
-            if (showZh) pendingLineFinishes++
-            if (pendingLineFinishes == 0) {
-                // Empty caption: advance immediately
-                scrollController.onScrollFinished()
-                return
-            }
-        }
-        enView?.setCaptionText(if (showEn) cap.en else "")
-        zhView?.setCaptionText(if (showZh) cap.zh else "")
-        if (layout == OverlayLayoutMode.FullSentence) {
+        val newEn = if (showEn) cap.en else ""
+        val newZh = if (showZh) cap.zh else ""
+
+        if (!isUpdate) {
+            // Start each caption at the user base speed; backlog callback may boost after
+            val baseSpeed = overlaySettings.overlayMarqueeSpeed
+                .coerceIn(20, CaptionLineView.SETTINGS_MAX_SPEED.toInt())
+                .toFloat()
+            enView?.speedPxPerSec = baseSpeed
+            zhView?.speedPxPerSec = baseSpeed
+            // Count lines that will report finish (marquee or dwell)
             pendingLineFinishes = 0
+            if (layout == OverlayLayoutMode.ScrollLine) {
+                if (showEn) pendingLineFinishes++
+                if (showZh) pendingLineFinishes++
+                if (pendingLineFinishes == 0) {
+                    // Empty caption: advance without deep recursion
+                    lastShownEn = ""
+                    lastShownZh = ""
+                    advanceEmptyScrollLine()
+                    return
+                }
+            }
+            emptyAdvanceDepth = 0
+            idleBlankedFingerprint = null
+            enView?.setCaptionText(newEn)
+            zhView?.setCaptionText(newZh)
+            lastShownEn = newEn
+            lastShownZh = newZh
+            if (layout == OverlayLayoutMode.FullSentence) {
+                pendingLineFinishes = 0
+            }
+            onCaptionContentApplied(newEn, newZh)
+            return
         }
+
+        // Mid-scroll / post-show update (typically translation just arrived).
+        // Do not reset speeds or finish counters for lines already running.
+        if (layout == OverlayLayoutMode.ScrollLine &&
+            newZh.isNotBlank() &&
+            lastShownZh.isBlank()
+        ) {
+            pendingLineFinishes++
+        }
+        idleBlankedFingerprint = null
+        enView?.setCaptionText(newEn)
+        zhView?.setCaptionText(newZh)
+        lastShownEn = newEn
+        lastShownZh = newZh
+        onCaptionContentApplied(newEn, newZh)
+    }
+
+    private fun advanceEmptyScrollLine() {
+        emptyAdvanceDepth++
+        if (emptyAdvanceDepth > 32) {
+            emptyAdvanceDepth = 0
+            android.util.Log.w(TAG, "empty ScrollLine advance depth exceeded; stop")
+            return
+        }
+        // Post so stacked empty captions do not blow the call stack
+        root?.post {
+            scrollController.onScrollFinished()
+        } ?: scrollController.onScrollFinished()
     }
 
     /**
@@ -279,9 +372,28 @@ class SubtitleOverlayService : Service() {
     }
 
     private fun showCaptionImmediate(cap: OverlayCaption) {
-        enView?.setCaptionText(cap.en)
-        zhView?.setCaptionText(cap.zh)
+        val en = cap.en
+        val zh = cap.zh
+        val fp = captionFingerprint(en, zh)
+        // After idle-blank, ignore re-emissions of the same last line until content changes.
+        if (idleBlankedFingerprint != null && fp == idleBlankedFingerprint) {
+            return
+        }
+        // Session state emits often (phase/queues); only treat real caption changes as activity.
+        val changed = en != lastShownEn || zh != lastShownZh
+        enView?.setCaptionText(en)
+        zhView?.setCaptionText(zh)
+        if (changed) {
+            lastShownEn = en
+            lastShownZh = zh
+            if (en.isNotBlank() || zh.isNotBlank()) {
+                idleBlankedFingerprint = null
+            }
+            onCaptionContentApplied(en, zh)
+        }
     }
+
+    private fun captionFingerprint(en: String, zh: String): String = "$en\u0000$zh"
 
     private fun onLineMarqueeFinished() {
         if (overlaySettings.overlayLayoutModeEnum() != OverlayLayoutMode.ScrollLine) return
@@ -290,6 +402,54 @@ class SubtitleOverlayService : Service() {
         if (pendingLineFinishes <= 0) {
             scrollController.onScrollFinished()
         }
+    }
+
+    /**
+     * Restart the idle-blank timer when non-empty caption text is applied.
+     * After [IDLE_BLANK_MS] with no further content, clear the floating text.
+     */
+    private fun onCaptionContentApplied(en: String, zh: String) {
+        if (en.isBlank() && zh.isBlank()) {
+            cancelIdleBlankTimer()
+            return
+        }
+        scheduleIdleBlank()
+    }
+
+    private fun scheduleIdleBlank() {
+        idleBlankJob?.cancel()
+        idleBlankJob = scope.launch {
+            delay(IDLE_BLANK_MS)
+            blankOverlayAfterIdle()
+        }
+    }
+
+    private fun cancelIdleBlankTimer() {
+        idleBlankJob?.cancel()
+        idleBlankJob = null
+    }
+
+    private fun blankOverlayAfterIdle() {
+        val fp = captionFingerprint(lastShownEn, lastShownZh)
+        if (fp != "\u0000") {
+            idleBlankedFingerprint = fp
+        }
+        clearOverlayTextOnly()
+        pendingLineFinishes = 0
+        lastShownEn = ""
+        lastShownZh = ""
+        // Allow next queued ScrollLine caption (if any) after we force-clear mid-scroll.
+        if (overlaySettings.overlayLayoutModeEnum() == OverlayLayoutMode.ScrollLine) {
+            scrollController.notifyDisplayCleared()
+        }
+    }
+
+    /** Clear caption text without tearing down the panel chrome. */
+    private fun clearOverlayTextOnly() {
+        enView?.cancelScroll()
+        zhView?.cancelScroll()
+        enView?.setCaptionText("")
+        zhView?.setCaptionText("")
     }
 
     private fun baseFlags(locked: Boolean): Int {
@@ -326,6 +486,7 @@ class SubtitleOverlayService : Service() {
     private fun applyChrome(s: UserSettings) {
         val density = resources.displayMetrics.density
         val alphaPct = s.overlayAlphaPercent.coerceIn(0, 100)
+        // 0 = fully transparent background; 100 = solid. Must allow true zero.
         val a = (alphaPct * 255 / 100).coerceIn(0, 255)
         val bgRgb = UserSettings.parseColorHex(s.overlayBgColor, Color.BLACK)
         val r = Color.red(bgRgb)
@@ -337,15 +498,17 @@ class SubtitleOverlayService : Service() {
             cornerRadius = CORNER_RADIUS_DP * density
             setColor(Color.argb(a, r, g, b))
         }
-        if (s.overlayShowBorder) {
-            val strokeA = (a * 0.45f).toInt().coerceIn(40, 180)
+        if (s.overlayShowBorder && a > 0) {
+            // Scale stroke with background opacity; never force a min when alpha is 0.
+            val strokeA = (a * 0.45f).toInt().coerceIn(1, 180)
             val strokeColor = if (locked) {
                 Color.argb(strokeA, 120, 120, 120)
             } else {
-                Color.argb(strokeA.coerceAtLeast(100), 76, 175, 80)
+                Color.argb(strokeA.coerceAtLeast(minOf(100, a)), 76, 175, 80)
             }
             bg.setStroke((1.5f * density).toInt().coerceAtLeast(1), strokeColor)
         } else {
+            // Opacity 0 or border off → no stroke (true transparent panel)
             bg.setStroke(0, Color.TRANSPARENT)
         }
         root?.background = bg
@@ -354,9 +517,9 @@ class SubtitleOverlayService : Service() {
         val zhColor = UserSettings.parseColorHex(s.overlayZhTextColor, Color.parseColor("#FFEB3B"))
         enView?.setTextColorInt(enColor)
         zhView?.setTextColorInt(zhColor)
-        // Divider: semi-transparent light line (or fully hidden via settings)
-        if (s.overlayShowDivider) {
-            val divA = (a * 0.55f).toInt().coerceIn(50, 160)
+        // Divider: scales with background opacity; fully gone at 0
+        if (s.overlayShowDivider && a > 0) {
+            val divA = (a * 0.55f).toInt().coerceIn(1, 160)
             dividerView?.setBackgroundColor(Color.argb(divA, 220, 220, 220))
         } else {
             dividerView?.setBackgroundColor(Color.TRANSPARENT)
@@ -515,6 +678,7 @@ class SubtitleOverlayService : Service() {
     override fun onDestroy() {
         // Remember position even if user locked after dragging, or service stops mid-session
         persistPosition()
+        cancelIdleBlankTimer()
         captionJob?.cancel()
         settingsJob?.cancel()
         scope.cancel()
@@ -527,7 +691,10 @@ class SubtitleOverlayService : Service() {
     }
 
     companion object {
+        private const val TAG = "SubtitleOverlay"
         private const val CORNER_RADIUS_DP = 14f
+        /** Clear floating caption text after this long without new content. */
+        const val IDLE_BLANK_MS = 3_000L
         const val ACTION_TOGGLE_LOCK = "com.example.livetranslate.action.OVERLAY_TOGGLE_LOCK"
         const val ACTION_APPLY_LOCK = "com.example.livetranslate.action.OVERLAY_APPLY_LOCK"
         private const val EXTRA_SHOW_TOAST = "show_toast"
@@ -563,15 +730,14 @@ class SubtitleOverlayService : Service() {
                 else -> lastLine(cumulativeZh)
             }
             val mode = settings.overlayTextModeEnum()
+            // Empty content stays blank — no "…" placeholder.
             val en = when (mode) {
                 OverlayTextMode.TranslationOnly -> ""
-                else -> enRaw.ifBlank { "…" }.takeLast(220)
+                else -> enRaw.takeLast(220)
             }
             val zh = when (mode) {
                 OverlayTextMode.SourceOnly -> ""
-                else -> zhRaw.ifBlank {
-                    if (settings.asrOnlyMode) "" else "…"
-                }.takeLast(220)
+                else -> zhRaw.takeLast(220)
             }
             return OverlayCaption(en = en, zh = zh)
         }

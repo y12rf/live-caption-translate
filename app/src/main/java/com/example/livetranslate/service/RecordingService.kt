@@ -138,6 +138,15 @@ class RecordingService : Service() {
                 // Tear-down (projection / stopSelf) happens when state → Idle (observe loop).
                 val drain = intent.getBooleanExtra(EXTRA_DRAIN, true)
                 try {
+                    // Already idle (UI stopped orchestrator first and we raced here): just exit.
+                    if (controller.state.value.phase == SessionPhase.Idle) {
+                        Log.i(TAG, "ACTION_STOP while already Idle — tear down service")
+                        releaseKeepAliveLocks()
+                        releaseProjection()
+                        stopOverlay()
+                        stopSelf()
+                        return START_NOT_STICKY
+                    }
                     controller.stop(drain = drain)
                 } catch (e: Exception) {
                     Log.e(TAG, "stop failed", e)
@@ -267,10 +276,38 @@ class RecordingService : Service() {
                     st.phase == SessionPhase.Idle
                 if (leftSession) {
                     Log.i(TAG, "session ended → release projection & stop service")
-                    releaseKeepAliveLocks()
-                    releaseProjection()
-                    stopOverlay()
-                    stopSelf()
+                    // Tear down once; never let overlay/projection errors crash the process.
+                    try {
+                        releaseKeepAliveLocks()
+                    } catch (e: Exception) {
+                        Log.w(TAG, "releaseKeepAliveLocks failed", e)
+                    }
+                    try {
+                        releaseProjection()
+                    } catch (e: Exception) {
+                        Log.e(TAG, "releaseProjection failed", e)
+                    }
+                    try {
+                        stopOverlay()
+                    } catch (e: Exception) {
+                        Log.w(TAG, "stopOverlay failed", e)
+                    }
+                    try {
+                        // Remove FGS notification before stopSelf (cleaner on OEM / API 34+).
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+                            stopForeground(STOP_FOREGROUND_REMOVE)
+                        } else {
+                            @Suppress("DEPRECATION")
+                            stopForeground(true)
+                        }
+                    } catch (e: Exception) {
+                        Log.w(TAG, "stopForeground failed", e)
+                    }
+                    try {
+                        stopSelf()
+                    } catch (e: Exception) {
+                        Log.w(TAG, "stopSelf failed", e)
+                    }
                 }
                 lastPhase = st.phase
             }
@@ -360,6 +397,18 @@ class RecordingService : Service() {
         releasingProjection = true
         val p = projection
         projection = null
+        // 1) Drop VirtualDisplay + clear AudioCapture token FIRST while projection is still
+        //    "alive", so playback-capture clients are not holding HAL when we p.stop().
+        try {
+            (application as? LiveTranslateApp)
+                ?.container
+                ?.sessionController
+                ?.setMediaProjection(null)
+        } catch (e: Exception) {
+            Log.w(TAG, "clear mediaProjection failed", e)
+        }
+        ProjectionTokenStore.clear()
+        // 2) Then unregister + stop the system MediaProjection session.
         if (p != null) {
             try {
                 p.unregisterCallback(projectionCallback)
@@ -367,18 +416,14 @@ class RecordingService : Service() {
             }
             try {
                 p.stop()
-            } catch (_: Exception) {
+            } catch (e: Exception) {
+                Log.w(TAG, "MediaProjection.stop failed", e)
             }
         }
-        (application as? LiveTranslateApp)
-            ?.container
-            ?.sessionController
-            ?.setMediaProjection(null)
-        ProjectionTokenStore.clear()
-        // Callback may still be queued on mainHandler after stop(); clear flag after drain.
-        mainHandler.post {
+        // Callback may still be queued on mainHandler after stop(); keep the flag a bit longer.
+        mainHandler.postDelayed({
             releasingProjection = false
-        }
+        }, 400)
     }
 
     private fun stopOverlay() {

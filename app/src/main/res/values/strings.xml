@@ -274,7 +274,7 @@
     <string name="settings_context_n">Context window N</string>
     <string name="settings_overlay_w">Overlay max width (dp)</string>
     <string name="settings_overlay_h">Overlay max height (dp)</string>
-    <string name="settings_overlay_alpha">Background opacity %</string>
+    <string name="settings_overlay_alpha">Background opacity % (0–100)</string>
     <string name="settings_overlay_bg">Background color</string>
     <string name="settings_overlay_en_color">Source text color</string>
     <string name="settings_overlay_zh_color">Translation text color</string>
@@ -282,8 +282,8 @@
     <string name="settings_reset_caption_defaults">Restore caption defaults</string>
     <string name="settings_overlay_text_mode">Subtitle content</string>
     <string name="settings_overlay_text_mode_info">What floating captions and home bilingual pairs show:\n• Both — source + translation\n• SourceOnly — source only\n• TranslationOnly — translation only</string>
-    <string name="settings_overlay_layout">Caption layout</string>
-    <string name="settings_overlay_layout_info">• FullSentence — full sentence, centered\n• ScrollLine — single-line horizontal marquee</string>
+    <string name="settings_overlay_layout">Floating overlay layout</string>
+    <string name="settings_overlay_layout_info">Applies only to the floating overlay (home list is always full sentences):\n• FullSentence — full sentence, centered\n• ScrollLine — single-line horizontal marquee\n\nAfter 3s with no new caption text, the overlay clears to blank.</string>
     <string name="settings_overlay_font_sp">Overlay font size (sp)</string>
     <string name="settings_overlay_pad_h">Text ↔ side padding (dp)</string>
     <string name="settings_overlay_pad_v">Text ↔ divider padding (dp)</string>
@@ -332,18 +332,18 @@
     <string name="settings_info_energy">RMS energy gate for speech vs silence. Raise in noisy rooms; lower if soft speech is missed.</string>
     <string name="settings_info_silero_mode">Silero score threshold mode:\n• NORMAL — balanced (default)\n• AGGRESSIVE — fewer false speech hits\n• VERY_AGGRESSIVE — strictest; may miss soft speech\n\nFrame size is fixed at 512 samples @ 16 kHz (~32 ms).</string>
     <string name="settings_info_context_n">How many previous EN/ZH pairs are sent as LLM context for terminology consistency.</string>
-    <string name="settings_info_overlay">Floating caption over other apps:\n• Content mode / layout / font size\n• Text padding (sides &amp; vs divider)\n• Border / divider on-off\n• Size, colors, opacity\n• Stack order (translation vs source on top)\n\nLock/unlock from the recording notification; unlocked = drag, locked = touch-through.</string>
+    <string name="settings_info_overlay">Floating caption over other apps (layout/font/colors do not change the home list layout):\n• Content mode / layout / font size\n• Text padding (sides &amp; vs divider)\n• Border / divider on-off\n• Size, colors, opacity (0% = fully transparent panel)\n• Stack order (translation vs source on top)\n• Auto-clear text after 3s with no new caption\n\nLock/unlock from the recording notification; unlocked = drag (still intercepts touch even if opacity is 0), locked = touch-through.</string>
     <string name="settings_info_overlay_font">Floating overlay text size in sp (10–48).</string>
     <string name="settings_info_live_font">Home bilingual list text size in sp (10–48).</string>
     <string name="settings_info_overlay_size">Max width/height in dp. Content scrolls if taller than max height.</string>
-    <string name="settings_info_overlay_color">Hex #RGB / #RRGGBB / #AARRGGBB. Background alpha is controlled by opacity % separately.</string>
+    <string name="settings_info_overlay_color">Hex #RGB / #RRGGBB / #AARRGGBB. Background alpha is controlled by opacity % separately (0 = fully transparent; lock overlay if you need touch-through while the panel is invisible).</string>
     <string name="settings_info_pipeline">History reprocess &amp; offline packing:\n• VAD batch — sentences packed per offline ASR call (default 70)\n• Title threshold — LLM title after N turns\n• Network retries — per ASR/LLM item\n• Translation cache — in-session cache size\n\nReprocess soft-skips failed batches/sentences and still saves partial results.\nLive file import uses the VAD + timeline pipeline (not this offline packer).</string>
     <string name="settings_info_offline_vad_batch">Offline/reprocess only: how many VAD sentences are packed into one ASR request.</string>
     <string name="settings_info_title_threshold">After this many completed turns, try LLM session title (live &amp; file import).</string>
     <string name="settings_info_max_attempts">Automatic retries per ASR/LLM request (1–10) with exponential backoff.</string>
     <string name="settings_info_translation_cache">In-session cache of identical source→translation pairs. Cleared when a new session starts.</string>
     <string name="settings_info_keep_screen_on">Keeps the Live screen awake while this option is on.</string>
-    <string name="settings_info_immersive">Hides status/navigation bars on the Live screen (swipe edge to show briefly). Full bilingual-only immersive is entered via the Immersive button on the home Live page.</string>
+    <string name="settings_info_immersive">Hides status/navigation bars on the Live screen (swipe edge to show briefly). Full bilingual-only immersive is entered via the fullscreen button in the Live top bar.</string>
     <string name="settings_prompt_title">Translation system prompt</string>
     <string name="settings_user_prompt_title">Translation user prompt</string>
     <string name="settings_title_system_prompt_title">Title system prompt</string>
@@ -356,7 +356,7 @@
     <string name="settings_max_attempts">Network retry attempts</string>
     <string name="settings_translation_cache">Translation cache max</string>
     <string name="settings_display">Display</string>
-    <string name="settings_display_info">Live screen options:\n• Keep screen on — prevents sleep during listening\n• Hide system bars — swipe edge to show briefly\n• ASR-only — recognize without translating\n\nEnter full-screen bilingual view from the Live home Immersive button.</string>
+    <string name="settings_display_info">Live screen options:\n• Keep screen on — prevents sleep during listening\n• Hide system bars — swipe edge to show briefly\n• ASR-only — recognize without translating\n\nEnter full-screen bilingual view from the fullscreen button in the Live top bar.</string>
     <string name="settings_keep_screen_on">Keep screen on (Live)</string>
     <string name="settings_immersive">Hide system bars (Live)</string>
     <string name="settings_warnings">Warnings</string>

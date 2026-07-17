@@ -25,6 +25,6 @@ class BuildDisplayTest {
 
     @Test
     fun emptyShowsEllipsis() {
-        assertEquals("...", buildDisplay("", ""))
+        assertEquals("", buildDisplay("", ""))
     }
 }

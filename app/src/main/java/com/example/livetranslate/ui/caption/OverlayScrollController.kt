@@ -11,21 +11,43 @@ import com.example.livetranslate.domain.model.TranscriptSegment
  * current marquee reports finished (no mid-scroll jump to the next utterance).
  * Streaming partials are never enqueued.
  *
+ * When the active text mode needs a translation (Both / TranslationOnly) and the
+ * session is not ASR-only, the **first** sighting of an incomplete empty-ZH
+ * segment is **held**. It is released when:
+ * - translation becomes ready ([isTranslationReady]), or
+ * - the segment's [TranscriptSegment.timestampMs] changes (LLM finish / fail path
+ *   bumps the stamp even if ZH stays empty).
+ *
+ * Mid-scroll translation fill-ins still call [onUpdate] so a late ZH update can
+ * paint onto the current caption without restarting the queue.
+ *
  * When a new sentence is recognized while the current line is still scrolling,
  * [onBacklog] fires with the pending queue depth so the UI can **speed up**
  * the active marquee and catch up.
  */
 class OverlayScrollController(
     private val onShow: (OverlayCaption) -> Unit,
-    private val onBacklog: (queueDepth: Int) -> Unit = {}
+    private val onBacklog: (queueDepth: Int) -> Unit = {},
+    /** Refresh the currently displayed caption (e.g. translation just arrived). */
+    private val onUpdate: (OverlayCaption) -> Unit = onShow
 ) {
     data class OverlayCaption(val en: String, val zh: String)
 
-    private data class Queued(val id: Long, var en: String, var zh: String)
+    private data class Queued(
+        val id: Long,
+        var en: String,
+        var zh: String,
+        var stampMs: Long
+    )
 
     private val queue = ArrayDeque<Queued>()
+    /** ASR-committed but waiting for translation settle before entering [queue]. */
+    private val held = LinkedHashMap<Long, Queued>()
     private val seenIds = LinkedHashSet<Long>()
     private var currentId: Long? = null
+    /** Last EN/ZH pushed to the UI for [currentId] (to avoid no-op onUpdate). */
+    private var currentEn: String = ""
+    private var currentZh: String = ""
     private var scrolling = false
     var finishBeforeNext: Boolean = true
 
@@ -34,9 +56,24 @@ class OverlayScrollController(
 
     fun reset() {
         queue.clear()
+        held.clear()
         seenIds.clear()
         currentId = null
+        currentEn = ""
+        currentZh = ""
         scrolling = false
+    }
+
+    /**
+     * Overlay display was cleared externally (e.g. idle blank). Drop "currently
+     * scrolling" so the next queued caption can show, without wiping the queue.
+     */
+    fun notifyDisplayCleared() {
+        scrolling = false
+        currentId = null
+        currentEn = ""
+        currentZh = ""
+        tryShowNext()
     }
 
     /**
@@ -45,28 +82,54 @@ class OverlayScrollController(
     fun onState(state: LiveSessionUiState, settings: UserSettings) {
         val mode = settings.overlayTextModeEnum()
         val asrOnly = settings.asrOnlyMode
+        val holdForZh = shouldHoldForTranslation(mode, asrOnly)
         var newlyEnqueued = 0
         for (seg in state.segments) {
             if (seg.source.isBlank() && seg.translation.isBlank()) continue
+            val en = mapEn(seg, mode)
+            val zh = mapZh(seg, mode, asrOnly)
             if (seg.localId !in seenIds) {
                 seenIds.add(seg.localId)
                 // Bound memory for long sessions
                 while (seenIds.size > 200) {
                     val first = seenIds.first()
                     seenIds.remove(first)
+                    held.remove(first)
                 }
-                queue.addLast(Queued(seg.localId, mapEn(seg, mode), mapZh(seg, mode, asrOnly)))
+                if (holdForZh && !isTranslationReady(seg, zh)) {
+                    held[seg.localId] = Queued(seg.localId, en, zh, seg.timestampMs)
+                    continue
+                }
+                queue.addLast(Queued(seg.localId, en, zh, seg.timestampMs))
                 newlyEnqueued++
             } else {
-                // Update translation when LLM finishes for a queued or current item
-                val en = mapEn(seg, mode)
-                val zh = mapZh(seg, mode, asrOnly)
-                queue.find { it.id == seg.localId }?.let {
-                    it.en = en
-                    it.zh = zh
-                }
-                if (currentId == seg.localId && !scrolling) {
-                    onShow(OverlayCaption(en, zh))
+                // Update translation when LLM finishes / fails for held / queued / current
+                held[seg.localId]?.let { h ->
+                    val stampChanged = seg.timestampMs != h.stampMs
+                    h.en = en
+                    h.zh = zh
+                    h.stampMs = seg.timestampMs
+                    // Ready text, or any real segment mutation (finish/fail bumps stamp).
+                    // Unrelated LiveSessionUiState emissions keep the same stamp → stay held.
+                    if (isTranslationReady(seg, zh) || stampChanged) {
+                        held.remove(seg.localId)
+                        queue.addLast(h)
+                        newlyEnqueued++
+                    }
+                    return@let
+                } ?: run {
+                    queue.find { it.id == seg.localId }?.let {
+                        it.en = en
+                        it.zh = zh
+                        it.stampMs = seg.timestampMs
+                    }
+                    // Refresh the line currently on screen when content changes
+                    // (typically late translation), even while scrolling.
+                    if (currentId == seg.localId && (en != currentEn || zh != currentZh)) {
+                        currentEn = en
+                        currentZh = zh
+                        onUpdate(OverlayCaption(en, zh))
+                    }
                 }
             }
         }
@@ -87,6 +150,8 @@ class OverlayScrollController(
         if (scrolling && finishBeforeNext) return
         val next = queue.removeFirstOrNull() ?: return
         currentId = next.id
+        currentEn = next.en
+        currentZh = next.zh
         scrolling = true
         onShow(OverlayCaption(next.en, next.zh))
         // Already have more queued: start this line at catch-up speed too
@@ -127,6 +192,25 @@ class OverlayScrollController(
         fun catchUpSpeed(basePxS: Float, queueDepth: Int): Float {
             if (queueDepth <= 0) return basePxS
             return (basePxS * catchUpMultiplier(queueDepth)).coerceAtMost(CATCH_UP_MAX_SPEED)
+        }
+
+        /**
+         * When true, ScrollLine waits for a follow-up update before first show
+         * (Both / TranslationOnly, and not ASR-only).
+         */
+        fun shouldHoldForTranslation(mode: OverlayTextMode, asrOnly: Boolean): Boolean {
+            if (asrOnly) return false
+            return mode == OverlayTextMode.Both || mode == OverlayTextMode.TranslationOnly
+        }
+
+        /**
+         * Ready on first sighting when ZH has content or segment is already finalized
+         * (`incomplete == false`).
+         */
+        fun isTranslationReady(seg: TranscriptSegment, mappedZh: String): Boolean {
+            if (mappedZh.isNotBlank()) return true
+            if (!seg.incomplete) return true
+            return false
         }
     }
 }

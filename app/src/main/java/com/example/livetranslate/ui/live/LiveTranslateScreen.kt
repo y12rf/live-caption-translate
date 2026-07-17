@@ -611,19 +611,11 @@ fun LiveTranslateScreen(
             }
 
             Spacer(Modifier.height(8.dp))
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween
-            ) {
-                Text(
-                    stringResource(R.string.live_panel_bilingual),
-                    fontWeight = FontWeight.Bold
-                )
-                TextButton(onClick = { immersiveContent = true }) {
-                    Text(stringResource(R.string.immersive_enter))
-                }
-            }
+            Text(
+                stringResource(R.string.live_panel_bilingual),
+                fontWeight = FontWeight.Bold,
+                modifier = Modifier.fillMaxWidth()
+            )
             if (settings.asrOnlyMode) {
                 Text(
                     stringResource(R.string.asr_only_banner),
@@ -676,11 +668,12 @@ fun LiveTranslateScreen(
                     confirmButton = {
                         TextButton(onClick = {
                             stopDialogOpen = false
-                            // Always stop the orchestrator from UI; also notify FGS so it
-                            // can tear down MediaProjection when Idle (mic/internal).
-                            viewModel.stop(drain = true)
+                            // Single stop path: orchestrator → Idle → RecordingService tears down
+                            // MediaProjection. Avoid double startService(STOP) races after Idle.
                             if (state.audioSource != AudioSourceType.File) {
                                 RecordingService.stop(context, drain = true)
+                            } else {
+                                viewModel.stop(drain = true)
                             }
                             SubtitleOverlayService.stop(context)
                             android.widget.Toast.makeText(
@@ -695,10 +688,11 @@ fun LiveTranslateScreen(
                     dismissButton = {
                         TextButton(onClick = {
                             stopDialogOpen = false
-                            // Immediate end: cancel in-flight ASR/LLM without waiting.
-                            viewModel.stop(drain = false)
+                            // Immediate end: one controller.stop only (via service or viewModel).
                             if (state.audioSource != AudioSourceType.File) {
                                 RecordingService.stop(context, drain = false)
+                            } else {
+                                viewModel.stop(drain = false)
                             }
                             SubtitleOverlayService.stop(context)
                             android.widget.Toast.makeText(
@@ -828,7 +822,8 @@ internal fun buildDisplay(cumulative: String, partial: String): String {
     val p = partial.trim()
     val c = cumulative.trimEnd()
     return when {
-        c.isEmpty() && p.isEmpty() -> "..."
+        // Empty session: blank, never "…" / "..."
+        c.isEmpty() && p.isEmpty() -> ""
         c.isEmpty() -> p
         p.isEmpty() -> c
         // Already committed as last line / whole buffer
@@ -860,6 +855,9 @@ private fun BilingualPairList(
         modifier = modifier,
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
+        // Home / immersive list always uses full multi-line sentences.
+        // Overlay ScrollLine / marquee is floating-caption only and must not affect this layout.
+        val homeLayout = OverlayLayoutMode.FullSentence
         items(segments, key = { it.localId }) { seg ->
             BilingualPairItem(
                 source = seg.source,
@@ -868,15 +866,13 @@ private fun BilingualPairList(
                 showTranslation = effectiveShowZh,
                 incomplete = seg.incomplete,
                 fontSp = fontSp,
-                layout = settings.overlayLayoutModeEnum(),
-                marqueeSpeedPxS = settings.overlayMarqueeSpeed
+                layout = homeLayout
             )
         }
         val pEn = partialEn.trim()
         val pZh = partialZh.trim()
-        // ScrollLine: hide streaming partials on home list too (same as overlay) — avoids jump.
-        val showPartial = settings.overlayLayoutModeEnum() != OverlayLayoutMode.ScrollLine &&
-            (pEn.isNotEmpty() || pZh.isNotEmpty())
+        // Always show streaming partials on the home list (full-sentence layout).
+        val showPartial = pEn.isNotEmpty() || pZh.isNotEmpty()
         if (showPartial) {
             item(key = "partial") {
                 BilingualPairItem(
@@ -886,24 +882,11 @@ private fun BilingualPairList(
                     showTranslation = effectiveShowZh,
                     incomplete = true,
                     fontSp = fontSp,
-                    layout = settings.overlayLayoutModeEnum(),
-                    marqueeSpeedPxS = settings.overlayMarqueeSpeed
+                    layout = homeLayout
                 )
             }
         }
-        if (segments.isEmpty() && pEn.isEmpty() && pZh.isEmpty()) {
-            item(key = "empty") {
-                Text(
-                    text = "…",
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(24.dp),
-                    textAlign = TextAlign.Center,
-                    style = MaterialTheme.typography.bodyLarge,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            }
-        }
+        // Empty list: no placeholder ellipsis — leave the panel blank.
     }
 }
 

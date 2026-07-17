@@ -1,14 +1,35 @@
+# IDE / tooling
 .superpowers/
 .worktrees/
 .idea/
 .gradle/
-**/build/
-local.properties
 *.iml
 .DS_Store
+.kotlin/
 captures/
 .externalNativeBuild/
 .cxx/
+
+# Build outputs
+**/build/
 *.apk
 *.ap_
 *.aab
+*.dex
+*.class
+
+# Local machine / secrets (never commit)
+local.properties
+*.jks
+*.keystore
+secrets.properties
+.env
+.env.*
+
+# Logs & crash dumps
+*.log
+*.hprof
+
+# OS
+Thumbs.db
+desktop.ini

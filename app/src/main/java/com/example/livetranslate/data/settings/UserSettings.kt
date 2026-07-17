@@ -91,7 +91,7 @@ data class UserSettings(
     val keepScreenOn: Boolean = false,
     /**
      * When true (default entry from Live), hide system bars.
-     * Immersive content view is entered via Live home button; this still controls bars.
+     * Immersive content view is entered via Live top-bar fullscreen button; this still controls bars.
      */
     val immersiveMode: Boolean = false,
     /**

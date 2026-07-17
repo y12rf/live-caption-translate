@@ -590,11 +590,6 @@ class SessionOrchestrator(
         }
 
         accumulateElapsed()
-        if (audio.sourceType != AudioSourceType.File) {
-            audio.stop(flush = true)
-        } else {
-            audio.stop(flush = false)
-        }
         collector?.cancel()
         collector = null
         stopTimer()
@@ -609,6 +604,22 @@ class SessionOrchestrator(
                         phase = SessionPhase.Processing,
                         importStatus = if (drain) "正在排空队列并保存…（再按 Stop 可强制结束）" else "正在保存…"
                     )
+                }
+
+                // Join capture IO before WAV finalize / MediaProjection release.
+                // Fire-and-forget cancel alone races AudioRecord + projection.stop (OEM crashes).
+                try {
+                    if (audio.sourceType != AudioSourceType.File) {
+                        audio.stopAndJoin(flush = true)
+                    } else {
+                        audio.stopAndJoin(flush = false)
+                    }
+                } catch (e: Exception) {
+                    android.util.Log.w(TAG, "stopAndJoin failed", e)
+                    try {
+                        audio.stop(flush = false)
+                    } catch (_: Exception) {
+                    }
                 }
 
                 if (drain) {
@@ -643,6 +654,7 @@ class SessionOrchestrator(
                 val title = sessionTitle?.takeIf { it.isNotBlank() }
                     ?: snapshot.sessionTitle?.takeIf { it.isNotBlank() }
                 val started = sessionStartedAt
+                // Only after capture thread has exited (no concurrent writeFrame).
                 val audioPath = try {
                     audio.finishSessionRecording()
                 } catch (e: Exception) {
@@ -1438,7 +1450,9 @@ class SessionOrchestrator(
                     if (s.localId == localId) {
                         s.copy(
                             translation = s.translation.ifBlank { "" },
-                            incomplete = true
+                            incomplete = true,
+                            // Bump stamp so ScrollLine hold can release (fields otherwise unchanged).
+                            timestampMs = System.currentTimeMillis()
                         )
                     } else s
                 },

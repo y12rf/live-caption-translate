@@ -95,12 +95,15 @@ class CaptionLineView @JvmOverloads constructor(
     }
 
     /**
-     * Set caption text. In marquee mode always restarts the scroll and will call
+     * Set caption text. In marquee mode restarts the scroll and will call
      * [onScrollFinished] once when a full cycle completes (or after dwell if no scroll).
+     *
+     * Same text is a no-op (keeps mid-scroll progress) so a late translation update
+     * on the sibling line does not restart this line.
      */
     fun setCaptionText(value: String) {
         val t = value
-        if (t == text && mode == Mode.FullSentence) {
+        if (t == text) {
             invalidate()
             return
         }
@@ -282,12 +285,18 @@ class CaptionLineView @JvmOverloads constructor(
         scrollOffset = 0f
         marqueeDistance = 0f
         finishPosted = false
+        // Empty text: idle, never spin waiting for layout (clear-to-blank path).
+        if (text.isEmpty()) {
+            finishPosted = true
+            invalidate()
+            return
+        }
         val contentW = (width - paddingLeft - paddingRight).coerceAtLeast(0)
-        if (contentW <= 0 || text.isEmpty()) {
+        if (contentW <= 0) {
             invalidate()
             // Wait for layout then try again
             post {
-                if (mode == Mode.Marquee && !finishPosted) startMarquee()
+                if (mode == Mode.Marquee && !finishPosted && text.isNotEmpty()) startMarquee()
             }
             return
         }

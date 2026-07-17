@@ -261,7 +261,7 @@
     <string name="settings_context_n">上下文句数 N</string>
     <string name="settings_overlay_w">悬浮窗最大宽度 (dp)</string>
     <string name="settings_overlay_h">悬浮窗最大高度 (dp)</string>
-    <string name="settings_overlay_alpha">背景不透明度 %</string>
+    <string name="settings_overlay_alpha">背景不透明度 %（0–100）</string>
     <string name="settings_overlay_bg">背景颜色</string>
     <string name="settings_overlay_en_color">原文颜色</string>
     <string name="settings_overlay_zh_color">译文颜色</string>
@@ -269,8 +269,8 @@
     <string name="settings_reset_caption_defaults">还原字幕默认设置</string>
     <string name="settings_overlay_text_mode">字幕内容</string>
     <string name="settings_overlay_text_mode_info">悬浮字幕与主页对照显示内容：\n• Both — 原文 + 译文\n• SourceOnly — 仅原文\n• TranslationOnly — 仅译文</string>
-    <string name="settings_overlay_layout">字幕布局</string>
-    <string name="settings_overlay_layout_info">• FullSentence — 显示整句，居中\n• ScrollLine — 单行横向滚动</string>
+    <string name="settings_overlay_layout">悬浮字幕布局</string>
+    <string name="settings_overlay_layout_info">仅作用于悬浮窗（主页列表始终整句换行）：\n• FullSentence — 显示整句，居中\n• ScrollLine — 单行横向滚动\n\n超过 3 秒没有新字幕时，悬浮窗文字会自动清空。</string>
     <string name="settings_overlay_font_sp">悬浮字幕字号 (sp)</string>
     <string name="settings_overlay_pad_h">文字左右边距 (dp)</string>
     <string name="settings_overlay_pad_v">文字上下/分割线边距 (dp)</string>
@@ -319,18 +319,18 @@
     <string name="settings_info_energy">语音/静音的能量门限。嘈杂环境可调高；漏检轻声可调低。</string>
     <string name="settings_info_silero_mode">Silero 分数阈值模式：\n• NORMAL — 均衡（默认）\n• AGGRESSIVE — 更少误检为语音\n• VERY_AGGRESSIVE — 最严格，可能漏掉轻声\n\n帧长固定 512 采样点 @ 16 kHz（约 32 ms）。</string>
     <string name="settings_info_context_n">送给 LLM 的上文 EN/ZH 句对数，用于术语与指代一致。</string>
-    <string name="settings_info_overlay">覆盖其他应用的悬浮字幕：\n• 内容模式 / 布局 / 字号\n• 文字边距（左右与分割线）\n• 边框 / 分割线可关\n• 尺寸、颜色、透明度\n• 上下顺序（译文/原文在上）\n\n在录音通知中锁定/解锁；解锁可拖动，锁定触摸穿透。</string>
+    <string name="settings_info_overlay">覆盖其他应用的悬浮字幕（布局/字号/颜色不改变主页列表布局）：\n• 内容模式 / 布局 / 字号\n• 文字边距（左右与分割线）\n• 边框 / 分割线可关\n• 尺寸、颜色、透明度（0% = 背景完全透明）\n• 上下顺序（译文/原文在上）\n• 3 秒无新字幕时自动清空文字\n\n在录音通知中锁定/解锁；解锁可拖动（即使透明度为 0 仍会挡住触摸），锁定后触摸穿透。</string>
     <string name="settings_info_overlay_font">悬浮字幕字号（sp，10–48）。</string>
     <string name="settings_info_live_font">主页双语列表字号（sp，10–48）。</string>
     <string name="settings_info_overlay_size">最大宽高（dp）。超过最大高度时内容可滚动。</string>
-    <string name="settings_info_overlay_color">十六进制 #RGB / #RRGGBB / #AARRGGBB。背景透明度由「不透明度 %」单独控制。</string>
+    <string name="settings_info_overlay_color">十六进制 #RGB / #RRGGBB / #AARRGGBB。背景透明度由「不透明度 %」单独控制（0 = 全透明；若面板不可见仍要点穿下层，请锁定悬浮窗）。</string>
     <string name="settings_info_pipeline">历史事后重跑与离线打包：\n• VAD 批大小 — 每批 ASR 合并句数（默认 70）\n• 标题阈值 — 满 N 句后生成 LLM 标题\n• 网络重试 — 单次 ASR/LLM 自动重试\n• 翻译缓存 — 会话内缓存容量\n\n失败批次/句子会软跳过，仍保存部分结果。\n主页文件导入走 Silero VAD + 时间轴录音管线（非此离线打包器）。</string>
     <string name="settings_info_offline_vad_batch">仅离线/重跑：每批打包进一次 ASR 请求的 VAD 句数。</string>
     <string name="settings_info_title_threshold">满 N 句后尝试 LLM 会话标题（实时与文件导入）。</string>
     <string name="settings_info_max_attempts">单次 ASR/LLM 自动重试次数（1–10），指数退避。</string>
     <string name="settings_info_translation_cache">相同原文→译文的会话内缓存。新会话开始时清空。</string>
     <string name="settings_info_keep_screen_on">开启后 Live 主界面保持常亮。</string>
-    <string name="settings_info_immersive">在 Live 主界面隐藏状态栏/导航栏（边缘滑动可短暂显示）。完整双语沉浸页请点主页「沉浸模式」。</string>
+    <string name="settings_info_immersive">在 Live 主界面隐藏状态栏/导航栏（边缘滑动可短暂显示）。完整双语沉浸页请点 Live 顶栏全屏按钮。</string>
     <string name="settings_prompt_title">翻译 system prompt</string>
     <string name="settings_user_prompt_title">翻译 user prompt</string>
     <string name="settings_title_system_prompt_title">标题 system prompt</string>
@@ -343,7 +343,7 @@
     <string name="settings_max_attempts">网络重试次数</string>
     <string name="settings_translation_cache">翻译缓存上限</string>
     <string name="settings_display">显示</string>
-    <string name="settings_display_info">主界面选项：\n• 屏幕常亮 — 听讲时不熄屏\n• 隐藏系统栏 — 隐藏状态栏/导航栏（边缘滑出）\n• 只识别 — 识别但不翻译\n\n完整沉浸双语页请在主页点「沉浸模式」进入。</string>
+    <string name="settings_display_info">主界面选项：\n• 屏幕常亮 — 听讲时不熄屏\n• 隐藏系统栏 — 隐藏状态栏/导航栏（边缘滑出）\n• 只识别 — 识别但不翻译\n\n完整沉浸双语页请点 Live 顶栏全屏按钮进入。</string>
     <string name="settings_keep_screen_on">屏幕常亮（主界面）</string>
     <string name="settings_immersive">隐藏系统栏（主界面）</string>
     <string name="settings_warnings">警告</string>

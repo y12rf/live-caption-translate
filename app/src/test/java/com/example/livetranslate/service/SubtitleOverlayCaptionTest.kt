@@ -33,10 +33,10 @@ class SubtitleOverlayCaptionTest {
     }
 
     @Test
-    fun emptyShowsEllipsis() {
+    fun emptyShowsBlankNotEllipsis() {
         val cap = LiveSessionUiState().toOverlayCaption()
-        assertEquals("…", cap.en)
-        assertEquals("…", cap.zh)
+        assertEquals("", cap.en)
+        assertEquals("", cap.zh)
     }
 
     @Test
