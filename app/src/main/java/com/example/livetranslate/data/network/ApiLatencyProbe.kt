@@ -4,7 +4,7 @@ import com.example.livetranslate.data.asr.ApiAuthStyle
 import com.example.livetranslate.data.asr.AsrApiStyle
 import com.example.livetranslate.data.asr.AsrClient.Companion.applyAuth
 import com.example.livetranslate.data.audio.WavEncoder
-import com.example.livetranslate.data.llm.LlmThinkingMode
+import com.example.livetranslate.data.llm.LlmThinkingBody
 import com.example.livetranslate.data.settings.UserSettings
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.MultipartBody
@@ -127,14 +127,16 @@ class ApiLatencyProbe(
             append("\"model\":\"").append(JsonLite.escape(settings.llmModel.ifBlank { "gpt-4o-mini" })).append("\",")
             append("\"stream\":false,")
             append("\"max_tokens\":1,")
-            when (settings.llmThinkingMode()) {
-                LlmThinkingMode.Default -> {}
-                LlmThinkingMode.True -> append("\"thinking\":true,")
-                LlmThinkingMode.False -> append("\"thinking\":false,")
-            }
             append("\"messages\":[")
             append("{\"role\":\"user\",\"content\":\"ping\"}")
-            append("]}")
+            append(']')
+            LlmThinkingBody.appendAfterMessages(
+                this,
+                mode = settings.llmThinkingMode(),
+                effort = settings.llmReasoningEffortEnum(),
+                style = settings.llmReasoningEffortStyleEnum()
+            )
+            append('}')
         }
         val request = Request.Builder()
             .url(url)

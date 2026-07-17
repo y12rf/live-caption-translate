@@ -13,7 +13,6 @@ import com.example.livetranslate.data.history.ExportTextMode
 import com.example.livetranslate.data.history.HistoryExport
 import com.example.livetranslate.data.history.HistoryRepository
 import com.example.livetranslate.data.llm.LlmClient
-import com.example.livetranslate.data.llm.LlmConfig
 import com.example.livetranslate.data.network.NetworkErrors
 import com.example.livetranslate.data.network.NetworkMonitor
 import com.example.livetranslate.data.settings.SettingsRepository
@@ -1124,17 +1123,7 @@ class SessionOrchestrator(
         llm.translateStream(
             en,
             ctx,
-            LlmConfig(
-                baseUrl = settings.normalizedLlmBaseUrl(),
-                apiKey = settings.llmApiKey.trim(),
-                model = model,
-                targetLanguage = targetLang,
-                sourceLanguage = sourceLang,
-                systemPrompt = settings.renderLlmSystemPrompt(),
-                authStyle = settings.llmAuthStyleEnum(),
-                fullUrl = settings.llmFullUrl,
-                thinking = settings.llmThinkingMode()
-            )
+            settings.toLlmConfig()
         ).collect { ev ->
             when (ev) {
                 is LlmStreamEvent.Delta -> {
@@ -1306,19 +1295,8 @@ class SessionOrchestrator(
                     titleRequested.set(false)
                     return@launch
                 }
-                val config = LlmConfig(
-                    baseUrl = settings.normalizedLlmBaseUrl(),
-                    apiKey = settings.llmApiKey.trim(),
-                    model = settings.llmModel.trim(),
-                    targetLanguage = settings.outputLanguage.trim(),
-                    sourceLanguage = settings.inputLanguage.trim(),
-                    systemPrompt = settings.renderLlmSystemPrompt(),
-                    authStyle = settings.llmAuthStyleEnum(),
-                    fullUrl = settings.llmFullUrl,
-                    thinking = settings.llmThinkingMode()
-                )
                 val title = withTimeout(TITLE_CALL_TIMEOUT_MS) {
-                    llm.summarizeSessionTitle(segsSnapshot, config)
+                    llm.summarizeSessionTitle(segsSnapshot, settings.toLlmConfig())
                 }
                 if (title.isNotBlank()) {
                     sessionTitle = title

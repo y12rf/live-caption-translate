@@ -50,14 +50,17 @@ class LlmClientTest {
             val completed = events.filterIsInstance<LlmStreamEvent.Completed>().single()
             assertEquals("你好", completed.fullText)
             val body = server.takeRequest().body.readUtf8()
-            assertTrue(!body.contains("\"thinking\""))
+            // Default LlmConfig thinking = Enabled → object form + high effort
+            assertTrue(body.contains("\"thinking\":{\"type\":\"enabled\"}"))
+            assertTrue(body.contains("\"reasoning_effort\":\"high\""))
+            assertTrue(!body.contains("\"thinking\":true"))
         } finally {
             server.shutdown()
         }
     }
 
     @Test
-    fun thinkingTrue_sentInBody_andFullUrlUsedAsIs() = runTest {
+    fun thinkingEnabled_openAi_afterMessages_andFullUrlUsedAsIs() = runTest {
         val server = MockWebServer()
         server.enqueue(
             MockResponse()
@@ -79,14 +82,16 @@ class LlmClientTest {
                     sourceLanguage = "en",
                     systemPrompt = "t",
                     fullUrl = true,
-                    thinking = LlmThinkingMode.True
+                    thinking = LlmThinkingMode.Enabled,
+                    reasoningEffort = LlmReasoningEffort.Max,
+                    reasoningEffortStyle = LlmReasoningEffortStyle.OpenAi
                 )
             ).toList()
             val req = server.takeRequest()
             assertEquals("/custom/llm", req.path)
             val body = req.body.readUtf8()
-            assertTrue(body.contains("\"thinking\":true"))
-            // thinking must appear after messages (not before)
+            assertTrue(body.contains("\"thinking\":{\"type\":\"enabled\"}"))
+            assertTrue(body.contains("\"reasoning_effort\":\"max\""))
             val msgIdx = body.indexOf("\"messages\"")
             val thinkIdx = body.indexOf("\"thinking\"")
             assertTrue(msgIdx >= 0 && thinkIdx > msgIdx)
@@ -96,7 +101,7 @@ class LlmClientTest {
     }
 
     @Test
-    fun thinkingFalse_sentInBody() = runTest {
+    fun thinkingDisabled_sentAsTypeDisabled() = runTest {
         val server = MockWebServer()
         server.enqueue(
             MockResponse()
@@ -117,11 +122,12 @@ class LlmClientTest {
                     targetLanguage = "zh",
                     sourceLanguage = "en",
                     systemPrompt = "t",
-                    thinking = LlmThinkingMode.False
+                    thinking = LlmThinkingMode.Disabled
                 )
             ).toList()
             val body = server.takeRequest().body.readUtf8()
-            assertTrue(body.contains("\"thinking\":false"))
+            assertTrue(body.contains("\"thinking\":{\"type\":\"disabled\"}"))
+            assertTrue(!body.contains("reasoning_effort"))
             val msgIdx = body.indexOf("\"messages\"")
             val thinkIdx = body.indexOf("\"thinking\"")
             assertTrue(msgIdx >= 0 && thinkIdx > msgIdx)

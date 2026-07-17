@@ -43,13 +43,47 @@ class UserSettingsTest {
     }
 
     @Test
-    fun defaultPrompt_containsToPlaceholder() {
-        assertTrue(UserSettings.DEFAULT_LLM_SYSTEM_PROMPT.contains("{{to}}"))
-        assertTrue(UserSettings.DEFAULT_LLM_SYSTEM_PROMPT.contains("{{glossary}}"))
-        val rendered = UserSettings(outputLanguage = "Chinese").renderLlmSystemPrompt()
+    fun defaultPrompt_containsRequiredPlaceholders() {
+        val p = UserSettings.DEFAULT_LLM_SYSTEM_PROMPT
+        assertTrue(p.contains("{{from}}"))
+        assertTrue(p.contains("{{to}}"))
+        assertTrue(p.contains("{{glossary}}"))
+        // English structured rules for simultaneous interpretation
+        assertTrue(p.contains("Output ONLY the translation"))
+        assertTrue(p.contains("Glossary"))
+        val rendered = UserSettings(
+            inputLanguage = "en",
+            outputLanguage = "Chinese"
+        ).renderLlmSystemPrompt()
         assertTrue(rendered.contains("Chinese"))
+        assertTrue(rendered.contains("en"))
+        assertTrue(!rendered.contains("{{from}}"))
         assertTrue(!rendered.contains("{{to}}"))
         assertTrue(!rendered.contains("{{glossary}}"))
+    }
+
+    @Test
+    fun defaultUserAndTitlePrompts_havePlaceholders() {
+        assertTrue(UserSettings.DEFAULT_LLM_USER_PROMPT.contains("{{history}}"))
+        assertTrue(UserSettings.DEFAULT_LLM_USER_PROMPT.contains("{{text}}"))
+        assertTrue(UserSettings.DEFAULT_LLM_TITLE_USER_PROMPT.contains("{{dialogue}}"))
+        assertTrue(UserSettings.DEFAULT_LLM_TITLE_SYSTEM_PROMPT.isNotBlank())
+    }
+
+    @Test
+    fun toLlmConfig_carriesEditablePrompts() {
+        val s = UserSettings(
+            llmUserPrompt = "U {{text}}",
+            llmTitleSystemPrompt = "TS",
+            llmTitleUserPrompt = "TU {{dialogue}}",
+            llmApiKey = "k",
+            llmModel = "m"
+        )
+        val c = s.toLlmConfig()
+        assertEquals("U {{text}}", c.userPromptTemplate)
+        assertEquals("TS", c.titleSystemPrompt)
+        assertEquals("TU {{dialogue}}", c.titleUserPromptTemplate)
+        assertTrue(c.systemPrompt.isNotBlank())
     }
 
     @Test

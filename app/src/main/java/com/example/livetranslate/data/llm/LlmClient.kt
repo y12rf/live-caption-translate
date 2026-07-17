@@ -5,6 +5,7 @@ import com.example.livetranslate.data.network.ApiUrlResolver
 import com.example.livetranslate.data.network.JsonLite
 import com.example.livetranslate.data.network.NetworkErrors
 import com.example.livetranslate.data.network.SseReader
+import com.example.livetranslate.data.settings.UserSettings
 import com.example.livetranslate.domain.model.ContextTurn
 import com.example.livetranslate.domain.model.LlmStreamEvent
 import com.example.livetranslate.domain.model.TranscriptSegment
@@ -40,38 +41,33 @@ class LlmClient(
             fullUrl = config.fullUrl
         )
 
+        val from = config.sourceLanguage.trim().ifBlank { "source" }
+        val to = config.targetLanguage.trim().ifBlank { "target" }
         val historyBlock = if (context.isEmpty()) {
             "(none)"
         } else {
             context.joinToString("\n") { turn ->
-                "EN: ${turn.source}\nZH: ${turn.translation}"
+                // Language-agnostic labels (not hardcoded EN/ZH).
+                "[$from] ${turn.source}\n[$to] ${turn.translation}"
             }
         }
 
-        // Customizable system prompt from settings; support {{to}} / {{from}}.
+        // System / user templates from settings (editable); fill remaining placeholders.
         val system = config.systemPrompt
-            .replace("{{to}}", config.targetLanguage)
-            .replace("{{from}}", config.sourceLanguage)
-            .ifBlank {
-                "你是一位精通 ${config.targetLanguage} 专业母语译者，致力于提供流畅、地道、符合表达习惯且高保真的翻译。"
-            }
+            .ifBlank { UserSettings.DEFAULT_LLM_SYSTEM_PROMPT }
+            .replace("{{from}}", from)
+            .replace("{{to}}", to)
+            .replace("{{glossary}}", "")
 
-        val user = buildString {
-            append("请将当前句从 ")
-            append(config.sourceLanguage)
-            append(" 译为 ")
-            append(config.targetLanguage)
-            append("。只输出当前句译文，不要重译历史；历史仅供术语与指代一致。\n\n")
-            append("History:\n")
-            append(historyBlock)
-            append("\n\nCurrent (")
-            append(config.sourceLanguage)
-            append("):\n")
-            append(sourceText)
-        }
+        val user = config.userPromptTemplate
+            .ifBlank { UserSettings.DEFAULT_LLM_USER_PROMPT }
+            .replace("{{from}}", from)
+            .replace("{{to}}", to)
+            .replace("{{history}}", historyBlock)
+            .replace("{{text}}", sourceText)
 
         // Build JSON as string (avoids Android JSONObject unit-test stubs).
-        // `thinking` is appended after messages (not before) — common OpenAI-compat layout.
+        // thinking / reasoning_effort (or output_config) after messages.
         val bodyJson = buildString {
             append('{')
             append("\"model\":\"").append(JsonLite.escape(config.model)).append("\",")
@@ -82,11 +78,12 @@ class LlmClient(
             append("{\"role\":\"user\",\"content\":\"")
                 .append(JsonLite.escape(user)).append("\"}")
             append(']')
-            when (config.thinking) {
-                LlmThinkingMode.Default -> { /* omit thinking field */ }
-                LlmThinkingMode.True -> append(",\"thinking\":true")
-                LlmThinkingMode.False -> append(",\"thinking\":false")
-            }
+            LlmThinkingBody.appendAfterMessages(
+                this,
+                mode = config.thinking,
+                effort = config.reasoningEffort,
+                style = config.reasoningEffortStyle
+            )
             append('}')
         }
 
@@ -183,11 +180,12 @@ class LlmClient(
             append("{\"role\":\"user\",\"content\":\"")
                 .append(JsonLite.escape(userPrompt)).append("\"}")
             append(']')
-            when (config.thinking) {
-                LlmThinkingMode.Default -> { }
-                LlmThinkingMode.True -> append(",\"thinking\":true")
-                LlmThinkingMode.False -> append(",\"thinking\":false")
-            }
+            LlmThinkingBody.appendAfterMessages(
+                this,
+                mode = config.thinking,
+                effort = config.reasoningEffort,
+                style = config.reasoningEffortStyle
+            )
             append('}')
         }
         val request = Request.Builder()
@@ -209,7 +207,9 @@ class LlmClient(
     }
 
     /**
-     * Summarize the first turns into a short history title (Chinese, ≤20 chars preferred).
+     * Summarize the first turns into a short history title.
+     * Prompts come from [LlmConfig.titleSystemPrompt] / [LlmConfig.titleUserPromptTemplate]
+     * (Settings-editable; English defaults).
      */
     suspend fun summarizeSessionTitle(
         segments: List<TranscriptSegment>,
@@ -219,12 +219,11 @@ class LlmClient(
         val dialogue = sample.mapIndexed { i, seg ->
             "${i + 1}. [${seg.source}] → [${seg.translation}]"
         }.joinToString("\n")
-        val system = "你是会议/课堂笔记助手，擅长用一句短语概括对话主题。"
-        val user = buildString {
-            append("根据下列同传对话（原文→译文），生成一个简短中文标题。\n")
-            append("要求：不超过20个字；不要引号、编号、标点装饰；只输出标题本身。\n\n")
-            append(dialogue)
-        }
+        val system = config.titleSystemPrompt
+            .ifBlank { UserSettings.DEFAULT_LLM_TITLE_SYSTEM_PROMPT }
+        val user = config.titleUserPromptTemplate
+            .ifBlank { UserSettings.DEFAULT_LLM_TITLE_USER_PROMPT }
+            .replace("{{dialogue}}", dialogue)
         val raw = completeOnce(system, user, config)
         return sanitizeTitle(raw)
     }

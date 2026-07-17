@@ -11,7 +11,6 @@ import com.example.livetranslate.data.audio.SessionAudioRecorder
 import com.example.livetranslate.data.audio.WavChunker
 import com.example.livetranslate.data.history.HistoryRepository
 import com.example.livetranslate.data.llm.LlmClient
-import com.example.livetranslate.data.llm.LlmConfig
 import com.example.livetranslate.data.network.NetworkErrors
 import com.example.livetranslate.data.network.NetworkMonitor
 import com.example.livetranslate.data.settings.SettingsRepository
@@ -502,17 +501,7 @@ class OfflineReprocessPipeline(
             withTimeoutOrNull(TITLE_CALL_TIMEOUT_MS) {
                 llm.summarizeSessionTitle(
                     segments = segments.take(titleThreshold),
-                    config = LlmConfig(
-                        baseUrl = settings.normalizedLlmBaseUrl(),
-                        apiKey = settings.llmApiKey.trim(),
-                        model = settings.llmModel.trim(),
-                        targetLanguage = settings.outputLanguage.trim(),
-                        sourceLanguage = settings.inputLanguage.trim(),
-                        systemPrompt = settings.renderLlmSystemPrompt(),
-                        authStyle = settings.llmAuthStyleEnum(),
-                        fullUrl = settings.llmFullUrl,
-                        thinking = settings.llmThinkingMode()
-                    )
+                    config = settings.toLlmConfig()
                 )
             }?.trim()?.takeIf { it.isNotBlank() }
         } catch (e: CancellationException) {
@@ -709,17 +698,7 @@ class OfflineReprocessPipeline(
         llm.translateStream(
             source,
             context,
-            LlmConfig(
-                baseUrl = settings.normalizedLlmBaseUrl(),
-                apiKey = settings.llmApiKey.trim(),
-                model = settings.llmModel.trim(),
-                targetLanguage = settings.outputLanguage.trim(),
-                sourceLanguage = settings.inputLanguage.trim(),
-                systemPrompt = settings.renderLlmSystemPrompt(),
-                authStyle = settings.llmAuthStyleEnum(),
-                fullUrl = settings.llmFullUrl,
-                thinking = settings.llmThinkingMode()
-            )
+            settings.toLlmConfig()
         ).collect { ev ->
             when (ev) {
                 is LlmStreamEvent.Delta -> zh += ev.text

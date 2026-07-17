@@ -2,30 +2,6 @@ package com.example.livetranslate.data.llm
 
 import com.example.livetranslate.data.asr.ApiAuthStyle
 
-/**
- * How to send the request body `thinking` field.
- *
- * - [Default]: omit the field entirely
- * - [True]: `"thinking": true`
- * - [False]: `"thinking": false`
- */
-enum class LlmThinkingMode {
-    Default,
-    True,
-    False;
-
-    companion object {
-        fun fromStorage(raw: String?): LlmThinkingMode {
-            val s = raw?.trim().orEmpty()
-            return when {
-                s.equals("true", ignoreCase = true) || s.equals(True.name, ignoreCase = true) -> True
-                s.equals("false", ignoreCase = true) || s.equals(False.name, ignoreCase = true) -> False
-                else -> Default
-            }
-        }
-    }
-}
-
 data class LlmConfig(
     val baseUrl: String,
     val apiKey: String,
@@ -33,12 +9,31 @@ data class LlmConfig(
     val targetLanguage: String,
     val sourceLanguage: String = "en",
     /**
-     * Already-rendered system prompt (placeholders like {{to}} resolved by caller),
-     * or a template that [LlmClient] will render if it still contains placeholders.
+     * Translation system prompt (placeholders like {{to}} may still be present;
+     * [LlmClient] fills leftovers).
      */
     val systemPrompt: String,
+    /**
+     * Translation user-message template.
+     * Placeholders: {{from}} {{to}} {{history}} {{text}}
+     * Blank → client default.
+     */
+    val userPromptTemplate: String = "",
+    /**
+     * Session-title system prompt. Blank → client default.
+     */
+    val titleSystemPrompt: String = "",
+    /**
+     * Session-title user template with {{dialogue}}. Blank → client default.
+     */
+    val titleUserPromptTemplate: String = "",
     val authStyle: ApiAuthStyle = ApiAuthStyle.Bearer,
     /** When true, use [baseUrl] as-is (no path append). */
     val fullUrl: Boolean = false,
-    val thinking: LlmThinkingMode = LlmThinkingMode.Default
+    /** `"thinking":{"type":"enabled"|"disabled"}` — default enabled. */
+    val thinking: LlmThinkingMode = LlmThinkingMode.Enabled,
+    /** Effort when thinking is enabled (`high` / `max`). */
+    val reasoningEffort: LlmReasoningEffort = LlmReasoningEffort.High,
+    /** OpenAI `reasoning_effort` vs Anthropic `output_config.effort`. */
+    val reasoningEffortStyle: LlmReasoningEffortStyle = LlmReasoningEffortStyle.OpenAi
 )

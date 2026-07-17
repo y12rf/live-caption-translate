@@ -2,6 +2,9 @@ package com.example.livetranslate.data.settings
 
 import com.example.livetranslate.data.asr.ApiAuthStyle
 import com.example.livetranslate.data.asr.AsrApiStyle
+import com.example.livetranslate.data.llm.LlmConfig
+import com.example.livetranslate.data.llm.LlmReasoningEffort
+import com.example.livetranslate.data.llm.LlmReasoningEffortStyle
 import com.example.livetranslate.data.llm.LlmThinkingMode
 
 data class UserSettings(
@@ -21,18 +24,38 @@ data class UserSettings(
     /** When true, LLM URL is used as-is (no OpenAI path append). */
     val llmFullUrl: Boolean = false,
     /**
-     * LLM body `thinking` field:
-     * Default = omit; true / false = send boolean.
-     * Stored as [LlmThinkingMode] name: Default | True | False
+     * Thinking switch: [LlmThinkingMode.Enabled] / [LlmThinkingMode.Disabled].
+     * Wire: `"thinking":{"type":"enabled"|"disabled"}` (default enabled).
+     * Legacy True/Default → Enabled; False → Disabled.
      */
-    val llmThinking: String = LlmThinkingMode.Default.name,
+    val llmThinking: String = LlmThinkingMode.Enabled.name,
     /**
-     * LLM system prompt template. Placeholders:
-     * - `{{to}}` → output language (e.g. zh / Chinese)
-     * - `{{from}}` → input language (e.g. en / English)
-     * - `{{glossary}}` → formatted glossary lines (may be empty)
+     * Reasoning effort when thinking is enabled: high | max.
+     * low/medium map to high; xhigh maps to max.
+     */
+    val llmReasoningEffort: String = LlmReasoningEffort.High.name,
+    /**
+     * Effort field style: OpenAi (`reasoning_effort`) or Anthropic (`output_config.effort`).
+     */
+    val llmReasoningEffortStyle: String = LlmReasoningEffortStyle.OpenAi.name,
+    /**
+     * Translation system-prompt template. Placeholders:
+     * `{{from}}` `{{to}}` `{{glossary}}`
      */
     val llmSystemPrompt: String = DEFAULT_LLM_SYSTEM_PROMPT,
+    /**
+     * Translation user-message template. Placeholders:
+     * `{{from}}` `{{to}}` `{{history}}` `{{text}}`
+     */
+    val llmUserPrompt: String = DEFAULT_LLM_USER_PROMPT,
+    /**
+     * Session-title system prompt (no required placeholders).
+     */
+    val llmTitleSystemPrompt: String = DEFAULT_LLM_TITLE_SYSTEM_PROMPT,
+    /**
+     * Session-title user-message template. Placeholder: `{{dialogue}}`
+     */
+    val llmTitleUserPrompt: String = DEFAULT_LLM_TITLE_USER_PROMPT,
     /** Global glossary pairs for `{{glossary}}` injection. */
     val glossaryTerms: List<GlossaryEntry> = emptyList(),
     /**
@@ -118,21 +141,98 @@ data class UserSettings(
 
     fun llmThinkingMode(): LlmThinkingMode = LlmThinkingMode.fromStorage(llmThinking)
 
+    fun llmReasoningEffortEnum(): LlmReasoningEffort =
+        LlmReasoningEffort.fromStorage(llmReasoningEffort)
+
+    fun llmReasoningEffortStyleEnum(): LlmReasoningEffortStyle =
+        LlmReasoningEffortStyle.fromStorage(llmReasoningEffortStyle)
+
     fun overlayTextModeEnum(): OverlayTextMode = OverlayTextMode.fromStorage(overlayTextMode)
 
     fun overlayLayoutModeEnum(): OverlayLayoutMode = OverlayLayoutMode.fromStorage(overlayLayoutMode)
 
     fun renderLlmSystemPrompt(): String =
-        llmSystemPrompt
-            .replace("{{to}}", outputLanguage)
-            .replace("{{from}}", inputLanguage)
+        llmSystemPrompt.ifBlank { DEFAULT_LLM_SYSTEM_PROMPT }
+            .replace("{{from}}", inputLanguage.trim())
+            .replace("{{to}}", outputLanguage.trim())
             .replace("{{glossary}}", GlossaryCodec.formatBlock(glossaryTerms))
 
+    /** Effective translation user template (never blank). */
+    fun effectiveLlmUserPrompt(): String =
+        llmUserPrompt.ifBlank { DEFAULT_LLM_USER_PROMPT }
+
+    fun effectiveLlmTitleSystemPrompt(): String =
+        llmTitleSystemPrompt.ifBlank { DEFAULT_LLM_TITLE_SYSTEM_PROMPT }
+
+    fun effectiveLlmTitleUserPrompt(): String =
+        llmTitleUserPrompt.ifBlank { DEFAULT_LLM_TITLE_USER_PROMPT }
+
+    /** Build [LlmConfig] for chat-completions (translate + title). */
+    fun toLlmConfig(): LlmConfig = LlmConfig(
+        baseUrl = normalizedLlmBaseUrl(),
+        apiKey = llmApiKey.trim(),
+        model = llmModel.trim(),
+        targetLanguage = outputLanguage.trim(),
+        sourceLanguage = inputLanguage.trim(),
+        systemPrompt = renderLlmSystemPrompt(),
+        userPromptTemplate = effectiveLlmUserPrompt(),
+        titleSystemPrompt = effectiveLlmTitleSystemPrompt(),
+        titleUserPromptTemplate = effectiveLlmTitleUserPrompt(),
+        authStyle = llmAuthStyleEnum(),
+        fullUrl = llmFullUrl,
+        thinking = llmThinkingMode(),
+        reasoningEffort = llmReasoningEffortEnum(),
+        reasoningEffortStyle = llmReasoningEffortStyleEnum()
+    )
+
     companion object {
+        /**
+         * Default simultaneous-interpretation system prompt (English).
+         * Placeholders: {{from}} {{to}} {{glossary}}
+         */
         const val DEFAULT_LLM_SYSTEM_PROMPT: String =
-            "你是一位精通 {{to}} 专业母语译者，致力于提供流畅、地道、符合表达习惯且高保真的翻译。" +
-                "uh,yeah这种口水话请略过不要翻译，可以结合上下文修正语音识别的错误，修正口吃的重复表达。" +
-                "术语表（须优先遵守；可为空）：\n{{glossary}}"
+            "You are a professional simultaneous interpreter. Translate from {{from}} into {{to}}.\n" +
+                "\n" +
+                "Output rules:\n" +
+                "1. Output ONLY the translation of the current utterance — no quotes, labels, prefixes, notes, or explanations.\n" +
+                "2. Prefer natural, idiomatic {{to}}; stay faithful to meaning; keep names and technical terms accurate.\n" +
+                "3. Skip pure fillers / false starts (e.g. uh, um, yeah, hmm) — do not translate them.\n" +
+                "4. You may lightly repair obvious ASR errors and stuttered repetitions using context; never invent content.\n" +
+                "5. When the glossary is non-empty, follow it strictly for listed terms.\n" +
+                "\n" +
+                "Glossary (must follow when non-empty; may be empty):\n" +
+                "{{glossary}}"
+
+        /**
+         * Default translation user-message template.
+         * Placeholders: {{from}} {{to}} {{history}} {{text}}
+         */
+        const val DEFAULT_LLM_USER_PROMPT: String =
+            "Translate the Current utterance from {{from}} into {{to}}.\n" +
+                "Output only the Current translation. Do not retranslate History; " +
+                "History is for terminology and reference consistency only.\n" +
+                "\n" +
+                "History:\n" +
+                "{{history}}\n" +
+                "\n" +
+                "Current ({{from}}):\n" +
+                "{{text}}"
+
+        /** Default session-title system prompt. */
+        const val DEFAULT_LLM_TITLE_SYSTEM_PROMPT: String =
+            "You are a note-taking assistant. Write a short title that captures the topic " +
+                "of a live-translated conversation."
+
+        /**
+         * Default session-title user template.
+         * Placeholder: {{dialogue}}
+         */
+        const val DEFAULT_LLM_TITLE_USER_PROMPT: String =
+            "Based on the following bilingual turns (source → translation), write a short title.\n" +
+                "Rules: preferably ≤20 characters or a few words; no quotes, numbering, or decoration; " +
+                "output the title only.\n" +
+                "\n" +
+                "{{dialogue}}"
 
         const val DEFAULT_OVERLAY_BG = "#000000"
         const val DEFAULT_OVERLAY_EN = "#FFFFFF"

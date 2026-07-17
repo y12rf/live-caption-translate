@@ -217,9 +217,17 @@
     <string name="settings_asr_auth">ASR auth</string>
     <string name="settings_llm_auth">LLM auth</string>
     <string name="settings_auth_style">Auth style</string>
-    <string name="settings_thinking">Thinking field</string>
+    <string name="settings_thinking">Thinking mode</string>
+    <string name="settings_reasoning_effort">Reasoning effort</string>
+    <string name="settings_reasoning_effort_style">Effort API style</string>
     <string name="settings_system_prompt">Translation system prompt</string>
-    <string name="settings_reset_prompt">Reset prompt to default</string>
+    <string name="settings_user_prompt">Translation user prompt</string>
+    <string name="settings_title_system_prompt">Session title system prompt</string>
+    <string name="settings_title_user_prompt">Session title user prompt</string>
+    <string name="settings_reset_prompt">Reset translation system prompt</string>
+    <string name="settings_reset_user_prompt">Reset translation user prompt</string>
+    <string name="settings_reset_title_prompts">Reset title prompts</string>
+    <string name="settings_reset_all_prompts">Reset all LLM prompts</string>
     <string name="settings_reset_defaults">Restore defaults</string>
     <string name="settings_reset_asr">Restore ASR defaults</string>
     <string name="settings_reset_llm">Restore LLM defaults</string>
@@ -271,8 +279,15 @@
     <string name="settings_info_asr_style">• OpenAiTranscriptions — multipart WAV (classic Whisper)\n• ChatCompletionsAudio — chat + base64 input_audio (e.g. MIMO)\n\nAffects request body only, not URL resolution.</string>
     <string name="settings_info_asr_auth">• Bearer — Authorization: Bearer &lt;key&gt;\n• ApiKeyHeader — api-key: &lt;key&gt; (e.g. Xiaomi MIMO)</string>
     <string name="settings_info_llm_auth">Having an API key ≠ ApiKeyHeader.\n\n• Bearer (DeepSeek / OpenAI, etc.) — Authorization: Bearer &lt;key&gt;\n• ApiKeyHeader — header name is api-key\n\nUse Bearer for DeepSeek.</string>
-    <string name="settings_info_thinking">Request body field `thinking` (appended after messages):\n• Default — omit field\n• True — \"thinking\": true\n• False — \"thinking\": false\n\nResponse thinking / reasoning_content is ignored; only delta.content / message.content is used. Tags like &lt;think&gt; are stripped.</string>
-    <string name="settings_info_system_prompt">System prompt for translation. Placeholders:\n• {{to}} — output language\n• {{from}} — input language\n• {{glossary}} — glossary block (only if present in the prompt)</string>
+    <string name="settings_info_thinking">Thinking switch (after messages):\n• Enabled — \"thinking\":{\"type\":\"enabled\"} + effort field\n• Disabled — \"thinking\":{\"type\":\"disabled\"}\n\nDefault is Enabled.\nResponse thinking / reasoning_content is ignored; only delta.content is used; &lt;think&gt; tags are stripped.</string>
+    <string name="settings_info_reasoning_effort">When thinking is Enabled, send effort:\n• High — ordinary translate (default)\n• Max — harder tasks\n\nCompat: low/medium → high, xhigh → max.\nOpenAI body: \"reasoning_effort\":\"high|max\"\nAnthropic body: \"output_config\":{\"effort\":\"high|max\"}</string>
+    <string name="settings_info_reasoning_effort_style">Where to put effort when thinking is Enabled:\n• OpenAi — top-level reasoning_effort (DeepSeek / OpenAI-compat)\n• Anthropic — output_config.effort</string>
+    <string name="settings_info_system_prompt">System message for live / offline translation.\n\nPlaceholders:\n• {{from}} — input language\n• {{to}} — output language\n• {{glossary}} — glossary lines (empty if none)\n\nDefault: translation-only, skip fillers, light ASR repair, glossary first.</string>
+    <string name="settings_info_user_prompt">User message for each translation request.\n\nPlaceholders:\n• {{from}} / {{to}} — languages\n• {{history}} — previous turns for context\n• {{text}} — current source utterance (required)\n\nMust include {{text}} so the model receives the sentence to translate.</string>
+    <string name="settings_info_title_system_prompt">System message when generating a session title after enough turns.</string>
+    <string name="settings_info_title_user_prompt">User message for session title generation.\n\nPlaceholder:\n• {{dialogue}} — numbered source → translation sample turns</string>
+    <string name="settings_prompt_section">LLM prompts</string>
+    <string name="settings_prompt_section_info">All chat prompts used by the app (translation system/user + session title). Edit freely; blank fields fall back to built-in English defaults on save.</string>
     <string name="settings_info_languages">Languages sent to ASR / LLM (not the app UI language).\nUse short codes such as en, zh, ja, or names your API accepts.</string>
     <string name="settings_info_input_lang">Source language for ASR and LLM (e.g. en).</string>
     <string name="settings_info_output_lang">Target language for translation (e.g. zh). Ignored in ASR-only mode.</string>
@@ -294,7 +309,10 @@
     <string name="settings_info_translation_cache">In-session cache of identical source→translation pairs. Cleared when a new session starts.</string>
     <string name="settings_info_keep_screen_on">Keeps the Live screen awake while this option is on.</string>
     <string name="settings_info_immersive">Hides status/navigation bars on the Live screen (swipe edge to show briefly). Full bilingual-only immersive is entered via the Immersive button on the home Live page.</string>
-    <string name="settings_prompt_title">System prompt</string>
+    <string name="settings_prompt_title">Translation system prompt</string>
+    <string name="settings_user_prompt_title">Translation user prompt</string>
+    <string name="settings_title_system_prompt_title">Title system prompt</string>
+    <string name="settings_title_user_prompt_title">Title user prompt</string>
     <string name="settings_full_url_title">Full URL</string>
     <string name="settings_pipeline">Pipeline / offline</string>
     <string name="settings_pipeline_info">History reprocess &amp; offline packing:\n• VAD batch size — sentences packed per ASR call (default 70)\n• Title threshold — LLM title after N turns\n• Network retries — ASR/LLM auto retries\n• Translation cache — session cache size\n\nFailed ASR/LLM items soft-skip; partial sessions are still saved.\nLive file import uses energy VAD + timeline (recording pipeline).</string>
@@ -307,7 +325,20 @@
     <string name="settings_keep_screen_on">Keep screen on (Live)</string>
     <string name="settings_immersive">Hide system bars (Live)</string>
     <string name="settings_warnings">Warnings</string>
-    <string name="glossary_prompt_suffix">\nGlossary (must follow when non-empty):\n{{glossary}}</string>
+    <!-- Settings hub (secondary menus) -->
+    <string name="settings_cat_general">General</string>
+    <string name="settings_cat_general_desc">App language, Live display, ASR-only</string>
+    <string name="settings_cat_asr">Speech recognition (ASR)</string>
+    <string name="settings_cat_asr_desc">API URL, key, model, latency test</string>
+    <string name="settings_cat_llm">Translation (LLM)</string>
+    <string name="settings_cat_llm_desc">API, prompt, glossary, languages</string>
+    <string name="settings_cat_audio">VAD &amp; pipeline</string>
+    <string name="settings_cat_audio_desc">Chunking, offline batch, retries, cache size</string>
+    <string name="settings_cat_appearance">Captions &amp; appearance</string>
+    <string name="settings_cat_appearance_desc">Overlay layout, colors, fonts</string>
+    <string name="settings_cat_system">System &amp; data</string>
+    <string name="settings_cat_system_desc">Battery keep-alive, clear cache / history</string>
+    <string name="glossary_prompt_suffix">\n\nGlossary (must follow when non-empty; may be empty):\n{{glossary}}</string>
 
     <!-- Overlay / share / misc UI -->
     <string name="overlay_locked">Overlay locked</string>

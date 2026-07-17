@@ -10,6 +10,8 @@ import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
+import com.example.livetranslate.data.llm.LlmReasoningEffort
+import com.example.livetranslate.data.llm.LlmReasoningEffortStyle
 import com.example.livetranslate.data.llm.LlmThinkingMode
 import com.example.livetranslate.util.AppLocale
 import kotlinx.coroutines.flow.Flow
@@ -32,7 +34,12 @@ class SettingsRepository(private val context: Context) {
         val llmAuthStyle = stringPreferencesKey("llm_auth_style")
         val llmFullUrl = booleanPreferencesKey("llm_full_url")
         val llmThinking = stringPreferencesKey("llm_thinking")
+        val llmReasoningEffort = stringPreferencesKey("llm_reasoning_effort")
+        val llmReasoningEffortStyle = stringPreferencesKey("llm_reasoning_effort_style")
         val llmSystemPrompt = stringPreferencesKey("llm_system_prompt")
+        val llmUserPrompt = stringPreferencesKey("llm_user_prompt")
+        val llmTitleSystemPrompt = stringPreferencesKey("llm_title_system_prompt")
+        val llmTitleUserPrompt = stringPreferencesKey("llm_title_user_prompt")
         val glossaryTerms = stringPreferencesKey("glossary_terms")
         val uiLanguage = stringPreferencesKey("ui_language")
         val inputLanguage = stringPreferencesKey("input_language")
@@ -86,7 +93,12 @@ class SettingsRepository(private val context: Context) {
             llmAuthStyle = p[Keys.llmAuthStyle] ?: d.llmAuthStyle,
             llmFullUrl = p[Keys.llmFullUrl] ?: d.llmFullUrl,
             llmThinking = p[Keys.llmThinking] ?: d.llmThinking,
+            llmReasoningEffort = p[Keys.llmReasoningEffort] ?: d.llmReasoningEffort,
+            llmReasoningEffortStyle = p[Keys.llmReasoningEffortStyle] ?: d.llmReasoningEffortStyle,
             llmSystemPrompt = p[Keys.llmSystemPrompt] ?: d.llmSystemPrompt,
+            llmUserPrompt = p[Keys.llmUserPrompt] ?: d.llmUserPrompt,
+            llmTitleSystemPrompt = p[Keys.llmTitleSystemPrompt] ?: d.llmTitleSystemPrompt,
+            llmTitleUserPrompt = p[Keys.llmTitleUserPrompt] ?: d.llmTitleUserPrompt,
             glossaryTerms = GlossaryCodec.decode(p[Keys.glossaryTerms]),
             uiLanguage = AppLocale.normalize(p[Keys.uiLanguage] ?: d.uiLanguage),
             inputLanguage = p[Keys.inputLanguage] ?: d.inputLanguage,
@@ -131,8 +143,21 @@ class SettingsRepository(private val context: Context) {
         prefs[Keys.llmAuthStyle] = next.llmAuthStyle.trim()
         prefs[Keys.llmFullUrl] = next.llmFullUrl
         prefs[Keys.llmThinking] = LlmThinkingMode.fromStorage(next.llmThinking).name
+        prefs[Keys.llmReasoningEffort] =
+            LlmReasoningEffort.fromStorage(next.llmReasoningEffort).name
+        prefs[Keys.llmReasoningEffortStyle] =
+            LlmReasoningEffortStyle.fromStorage(next.llmReasoningEffortStyle).name
         prefs[Keys.llmSystemPrompt] = next.llmSystemPrompt.ifBlank {
             UserSettings.DEFAULT_LLM_SYSTEM_PROMPT
+        }
+        prefs[Keys.llmUserPrompt] = next.llmUserPrompt.ifBlank {
+            UserSettings.DEFAULT_LLM_USER_PROMPT
+        }
+        prefs[Keys.llmTitleSystemPrompt] = next.llmTitleSystemPrompt.ifBlank {
+            UserSettings.DEFAULT_LLM_TITLE_SYSTEM_PROMPT
+        }
+        prefs[Keys.llmTitleUserPrompt] = next.llmTitleUserPrompt.ifBlank {
+            UserSettings.DEFAULT_LLM_TITLE_USER_PROMPT
         }
         prefs[Keys.glossaryTerms] = GlossaryCodec.encode(next.glossaryTerms)
         prefs[Keys.uiLanguage] = AppLocale.normalize(next.uiLanguage)
