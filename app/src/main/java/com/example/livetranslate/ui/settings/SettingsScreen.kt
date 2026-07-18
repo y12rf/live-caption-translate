@@ -914,7 +914,7 @@ private fun AppearanceCategoryContent(
                     overlayPadVDp = UserSettings.DEFAULT_OVERLAY_PAD_V_DP,
                     overlayMarqueeSpeed = UserSettings.DEFAULT_OVERLAY_MARQUEE_SPEED,
                     overlayMarqueeFinishBeforeNext = true,
-                    overlayShowBorder = true,
+                    overlayShowBorder = UserSettings.DEFAULT_OVERLAY_SHOW_BORDER,
                     overlayShowDivider = true,
                     liveFontSizeSp = UserSettings.DEFAULT_LIVE_FONT_SP
                 )

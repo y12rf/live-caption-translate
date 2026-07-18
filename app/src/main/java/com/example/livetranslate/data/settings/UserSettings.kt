@@ -103,9 +103,9 @@ data class UserSettings(
     /** Max width in dp (clamped to screen). */
     val overlayMaxWidthDp: Int = 360,
     /** Max height in dp; content scrolls if taller. */
-    val overlayMaxHeightDp: Int = 140,
+    val overlayMaxHeightDp: Int = DEFAULT_OVERLAY_HEIGHT_DP,
     /** Background opacity 0–100 (0 = fully transparent, 100 = solid). */
-    val overlayAlphaPercent: Int = 80,
+    val overlayAlphaPercent: Int = DEFAULT_OVERLAY_ALPHA,
     /** Background RGB, e.g. #000000 or #FF000000 (alpha ignored; use overlayAlphaPercent). */
     val overlayBgColor: String = DEFAULT_OVERLAY_BG,
     /** Source-line text color, e.g. #FFFFFF */
@@ -150,7 +150,7 @@ data class UserSettings(
      */
     val overlayMarqueeFinishBeforeNext: Boolean = true,
     /** Draw stroke around the floating panel (lock green / lock gray). */
-    val overlayShowBorder: Boolean = true,
+    val overlayShowBorder: Boolean = DEFAULT_OVERLAY_SHOW_BORDER,
     /** Draw the line between source and translation when both are shown. */
     val overlayShowDivider: Boolean = true,
     /** Live home bilingual panel text size in sp (10–48). */
@@ -265,8 +265,9 @@ data class UserSettings(
         const val DEFAULT_OVERLAY_FONT_SP = 16
         const val DEFAULT_LIVE_FONT_SP = 16
         const val DEFAULT_OVERLAY_WIDTH_DP = 360
-        const val DEFAULT_OVERLAY_HEIGHT_DP = 140
-        const val DEFAULT_OVERLAY_ALPHA = 80
+        const val DEFAULT_OVERLAY_HEIGHT_DP = 80
+        const val DEFAULT_OVERLAY_ALPHA = 0
+        const val DEFAULT_OVERLAY_SHOW_BORDER = false
         /** Tighter than the old hard-coded 14dp. */
         const val DEFAULT_OVERLAY_PAD_H_DP = 6
         /** Tighter than the old hard-coded 10dp. */

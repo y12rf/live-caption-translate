@@ -85,6 +85,27 @@ class SettingsRepository(private val context: Context) {
         }
     }
 
+    /**
+     * Ensure [Keys.uiLanguage] is persisted. Missing key used to display as English in
+     * Settings while resources still followed the system language — seed the product default.
+     * @return normalized language tag to apply to AppCompat
+     */
+    suspend fun ensureUiLanguageAndGet(): String {
+        var resolved = AppLocale.EN
+        context.dataStore.edit { prefs ->
+            val raw = prefs[Keys.uiLanguage]
+            if (raw == null) {
+                prefs[Keys.uiLanguage] = AppLocale.EN
+                resolved = AppLocale.EN
+            } else {
+                resolved = AppLocale.normalize(raw)
+                // Re-write normalized form if user stored a synonym (e.g. zh-CN).
+                prefs[Keys.uiLanguage] = resolved
+            }
+        }
+        return resolved
+    }
+
     private fun read(p: Preferences): UserSettings {
         val d = UserSettings()
         return UserSettings(
