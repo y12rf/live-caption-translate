@@ -220,7 +220,7 @@ flowchart LR
 ## 构建与打包备注
 
 - **minSdk** 26 · **targetSdk** 34 · `applicationId` `com.example.livetranslate`
-- ABI 分包：`arm64-v8a`、`x86`（无 universal 胖包）
+- ABI：`arm64-v8a`（CI）。本地模拟器可在 `splits.abi` 临时加 `x86`
 - Release 默认 debug 签名（仅旁加载）
 - FFmpeg 原生库会增大 APK
 - Room 跨 schema 使用破坏性迁移（可能清空历史）

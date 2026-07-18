@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.2.0
+
+- Default UI language applies English on first launch (no longer follows system Chinese while Settings shows English)
+- Overlay defaults: background opacity **0**, max height **80**, border **off**
+- Docs: slim README; architecture / build / usage under `doc/`
+- CI Release: arm64 only; shorter release notes
+- versionName **1.2.0** (versionCode 5)
+
 ## 1.1.0
 
 ### Captions / overlay

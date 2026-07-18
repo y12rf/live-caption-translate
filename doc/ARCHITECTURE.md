@@ -220,7 +220,7 @@ Configurable in Settings; defaults:
 ## Build / packaging notes
 
 - **minSdk** 26 · **targetSdk** 34 · `applicationId` `com.example.livetranslate`
-- ABI splits: `arm64-v8a`, `x86` (no fat APK)
+- ABI: `arm64-v8a` (CI). Add `x86` in `splits.abi` for local emulator builds if needed.
 - Release defaults to debug keystore (sideload only)
 - FFmpeg native libs increase APK size
 - Room uses destructive migration on schema jump (can wipe history)

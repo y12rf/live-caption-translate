@@ -1,6 +1,6 @@
 # Live Translate（实时翻译）
 
-**v1.1.0** · 语音 → 流式识别 → 流式翻译 · [MIT](LICENSE)
+**v1.2.0** · 语音 → 流式识别 → 流式翻译 · [MIT](LICENSE)
 
 [English](README.md) · **中文**
 
@@ -17,7 +17,7 @@
 
 ## 快速开始
 
-1. 从 [Releases](https://github.com/y12rf/live-caption-translate/releases) 安装 APK（arm64 或 x86）。
+1. 从 [Releases](https://github.com/y12rf/live-caption-translate/releases) 安装 arm64 APK。
 2. **设置** → 填写 ASR / LLM 的地址、Key、模型、鉴权。
 3. **实时** → 选音源 → **开始**。
 

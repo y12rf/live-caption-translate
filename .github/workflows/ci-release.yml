@@ -1,4 +1,4 @@
-# Build on every change; publish a GitHub Release (with APKs) on push to master.
+# Build on every change; publish a GitHub Release (arm64 APK) on push to master.
 name: CI & Release
 
 on:
@@ -21,7 +21,6 @@ jobs:
       contents: read
     outputs:
       version_name: ${{ steps.ver.outputs.version_name }}
-      version_code: ${{ steps.ver.outputs.version_code }}
       short_sha: ${{ steps.ver.outputs.short_sha }}
       artifact_name: ${{ steps.ver.outputs.artifact_name }}
 
@@ -45,42 +44,34 @@ jobs:
       - name: Unit tests
         run: ./gradlew :app:testDebugUnitTest --stacktrace --no-daemon
 
-      - name: Assemble release APKs
-        # Release uses the debug keystore (sideload-friendly; see app/build.gradle.kts).
+      - name: Assemble release APK
+        # arm64 only; debug keystore (sideload). x86: build locally if needed.
         run: ./gradlew :app:assembleRelease --stacktrace --no-daemon
 
       - name: Read version
         id: ver
         run: |
           NAME=$(grep -E 'versionName\s*=' app/build.gradle.kts | head -1 | sed -E 's/.*"([^"]+)".*/\1/')
-          CODE=$(grep -E 'versionCode\s*=' app/build.gradle.kts | head -1 | sed -E 's/[^0-9]//g')
           SHORT_SHA="${GITHUB_SHA::7}"
           ARTIFACT="LiveTranslate-${NAME}-${SHORT_SHA}"
           {
             echo "version_name=$NAME"
-            echo "version_code=$CODE"
             echo "short_sha=$SHORT_SHA"
             echo "artifact_name=$ARTIFACT"
           } >> "$GITHUB_OUTPUT"
-          echo "versionName=$NAME versionCode=$CODE artifact=$ARTIFACT"
 
-      - name: Stage APK artifacts
+      - name: Stage APK
         run: |
           mkdir -p dist
           NAME="${{ steps.ver.outputs.version_name }}"
           shopt -s nullglob
-          for f in app/build/outputs/apk/release/*.apk; do
-            base=$(basename "$f")
-            # app-arm64-v8a-release.apk → LiveTranslate-1.1.0-arm64-v8a.apk
-            abi=$(echo "$base" | sed -E 's/^app-(.+)-release\.apk$/\1/')
-            cp "$f" "dist/LiveTranslate-${NAME}-${abi}.apk"
-          done
-          count=$(find dist -name '*.apk' | wc -l | tr -d ' ')
-          if [ "$count" -lt 1 ]; then
-            echo "No APKs under app/build/outputs/apk/release/"
+          apk=(app/build/outputs/apk/release/*arm64*.apk)
+          if [ ${#apk[@]} -lt 1 ]; then
+            echo "No arm64 APK under app/build/outputs/apk/release/"
             ls -laR app/build/outputs/apk || true
             exit 1
           fi
+          cp "${apk[0]}" "dist/LiveTranslate-${NAME}-arm64.apk"
           ls -lh dist/
 
       - name: Upload build artifacts
@@ -90,16 +81,6 @@ jobs:
           path: dist/*.apk
           if-no-files-found: error
           retention-days: 30
-
-      - name: Job summary
-        run: |
-          {
-            echo "### Build OK"
-            echo ""
-            echo "- **versionName:** \`${{ steps.ver.outputs.version_name }}\`"
-            echo "- **versionCode:** \`${{ steps.ver.outputs.version_code }}\`"
-            echo "- **commit:** \`${{ github.sha }}\`"
-          } >> "$GITHUB_STEP_SUMMARY"
 
   release:
     name: Publish GitHub Release
@@ -114,7 +95,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Download APKs
+      - name: Download APK
         uses: actions/download-artifact@v4
         with:
           name: ${{ needs.build.outputs.artifact_name }}
@@ -123,30 +104,14 @@ jobs:
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          # Unique tag per commit so every master push can publish without clashing.
           tag_name: v${{ needs.build.outputs.version_name }}-${{ needs.build.outputs.short_sha }}
-          name: v${{ needs.build.outputs.version_name }} (${{ needs.build.outputs.short_sha }})
+          name: v${{ needs.build.outputs.version_name }}
           target_commitish: ${{ github.sha }}
-          generate_release_notes: true
+          generate_release_notes: false
           files: dist/*.apk
           body: |
-            Continuous build from `master`.
+            `${{ needs.build.outputs.short_sha }}` · arm64 · debug-signed (sideload)
 
-            | | |
-            |---|---|
-            | **versionName** | `${{ needs.build.outputs.version_name }}` |
-            | **versionCode** | `${{ needs.build.outputs.version_code }}` |
-            | **commit** | `${{ github.sha }}` |
-
-            ### Install
-            - Phone (arm64): download `LiveTranslate-*-arm64-v8a.apk`
-            - Emulator (x86): download `LiveTranslate-*-x86.apk`
-
-            Release APKs are signed with the **debug keystore** (sideload only). See README for setup (ASR / LLM API keys).
-
-            ### Verify
-            ```text
-            package: com.example.livetranslate
-            ```
+            Setup: see README (ASR / LLM keys).
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

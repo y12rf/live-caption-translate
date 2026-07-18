@@ -14,12 +14,15 @@ For end-user install and API setup, see the [README](../README.md).
 gradlew.bat :app:assembleDebug
 ```
 
-| Variant | Path |
-|---------|------|
-| arm64 | `app/build/outputs/apk/debug/app-arm64-v8a-debug.apk` |
-| x86 | `app/build/outputs/apk/debug/app-x86-debug.apk` |
+Output (default ABI is arm64 only):
 
-Install the APK that matches your device/emulator ABI, then configure ASR/LLM in **Settings** (see [README → Configuration](../README.md#configuration)).
+`app/build/outputs/apk/debug/app-arm64-v8a-debug.apk`
+
+Install, then set ASR/LLM in **Settings** ([README](../README.md)).
+
+### Emulator (x86)
+
+CI and the default project only build **arm64**. For an x86 emulator, temporarily add `"x86"` to `splits.abi.include` in `app/build.gradle.kts`, then assemble again.
 
 ## Optional tests
 
@@ -30,8 +33,7 @@ gradlew.bat :app:testDebugUnitTest
 ## Notes
 
 - **minSdk** 26 · **targetSdk** 34 · `applicationId` `com.example.livetranslate`
-- ABI splits: `arm64-v8a`, `x86` (no universal fat APK)
-- Release builds default to the debug keystore (sideload only) — replace for Play Store
-- Fork tip: change `namespace` / `applicationId` under `app/build.gradle.kts` before publishing under your own package name
+- Release uses the debug keystore by default (sideload only)
+- Fork tip: change `namespace` / `applicationId` in `app/build.gradle.kts` before publishing under your package name
 
 Architecture details: [ARCHITECTURE.md](ARCHITECTURE.md).

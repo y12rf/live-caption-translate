@@ -13,19 +13,19 @@ android {
         applicationId = "com.example.livetranslate"
         minSdk = 26
         targetSdk = 34
-        versionCode = 4
-        versionName = "1.1.0"
+        versionCode = 5
+        versionName = "1.2.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         // ABI list lives only in splits.abi (ndk.abiFilters conflicts with splits).
     }
 
-    // Separate APKs per ABI (no fat universal): phone arm64 + emulator x86.
+    // Phone arm64 only (CI ships this). Emulator x86: add "x86" here and rebuild locally.
     // Do not also set defaultConfig.ndk.abiFilters — AGP rejects both together.
     splits {
         abi {
             isEnable = true
             reset()
-            include("arm64-v8a", "x86")
+            include("arm64-v8a")
             isUniversalApk = false
         }
     }

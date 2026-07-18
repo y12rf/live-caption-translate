@@ -1,6 +1,6 @@
 # Live Translate
 
-**v1.1.0** · Speech → streaming ASR → streaming translation on Android · [MIT](LICENSE)
+**v1.2.0** · Speech → streaming ASR → streaming translation on Android · [MIT](LICENSE)
 
 **English** · [中文](README.zh-CN.md)
 
@@ -17,7 +17,7 @@ Bring your own OpenAI-compatible **ASR** and **LLM**. Built for lectures and not
 
 ## Quick start
 
-1. Install an APK from [Releases](https://github.com/y12rf/live-caption-translate/releases) (arm64 or x86).
+1. Install the arm64 APK from [Releases](https://github.com/y12rf/live-caption-translate/releases).
 2. **Settings** → set ASR + LLM URL, key, model, auth.
 3. **Live** → pick source → **Start**.
 
