@@ -1,6 +1,6 @@
 # Live Translate
 
-**v1.2.0** · Speech → streaming ASR → streaming translation on Android · [MIT](LICENSE)
+**v1.2.1-beta** · Speech → streaming ASR → streaming translation on Android · [MIT](LICENSE)
 
 **English** · [中文](README.zh-CN.md)
 

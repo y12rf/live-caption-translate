@@ -15,7 +15,7 @@ import com.example.livetranslate.data.history.TimelineItem
 import com.example.livetranslate.data.llm.LlmClient
 import com.example.livetranslate.data.settings.SettingsRepository
 import com.example.livetranslate.di.AppContainer
-import com.example.livetranslate.domain.OfflineReprocessPipeline
+import com.example.livetranslate.domain.ReprocessEngine
 import com.example.livetranslate.domain.ReprocessUiState
 import com.example.livetranslate.domain.model.LlmStreamEvent
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -38,7 +38,7 @@ import kotlinx.coroutines.launch
 @OptIn(FlowPreview::class, ExperimentalCoroutinesApi::class)
 class HistoryViewModel(
     private val repo: HistoryRepository,
-    private val reprocess: OfflineReprocessPipeline,
+    private val reprocess: ReprocessEngine,
     private val llm: LlmClient,
     private val settingsRepo: SettingsRepository
 ) : ViewModel() {
@@ -168,19 +168,19 @@ class HistoryViewModel(
         }
     }
 
-    /** Swipe right: select this line (enter multi-select if needed). */
+    /** Swipe right in multi-select: select this line. */
     fun swipeSelect(id: Long) {
-        enterSelectionMode(seedId = id)
+        if (!_selectionMode.value) return
         _selectedIds.update { it + id }
     }
 
-    /** Swipe left: deselect this line; exit multi-select when none left. */
+    /**
+     * Swipe left in multi-select: deselect this line.
+     * Keeps multi-select mode even if none remain (exit via Cancel).
+     */
     fun swipeDeselect(id: Long) {
         if (!_selectionMode.value) return
         _selectedIds.update { it - id }
-        if (_selectedIds.value.isEmpty()) {
-            _selectionMode.value = false
-        }
     }
 
     fun selectAllVisible() {
@@ -305,7 +305,8 @@ class HistoryViewModel(
         val d = _detail.value ?: return
         val path = d.session.audioPath ?: return
         if (SessionAudioRecorder.fileForPath(path) == null) return
-        reprocess.start(path, d.session.previewZh)
+        val offsets = d.segments.map { it.offsetMs }
+        reprocess.start(path, d.session.previewZh, offsets)
     }
 
     fun cancelReprocess() = reprocess.cancel()

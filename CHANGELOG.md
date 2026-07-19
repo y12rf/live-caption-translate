@@ -1,5 +1,17 @@
 # Changelog
 
+## 1.2.1-beta
+
+- **Reprocess (scheme C′)**: replace `OfflineReprocessPipeline` with `ReprocessEngine`
+  - Cut WAV by history timeline offsets (VAD when no axis / orphan)
+  - Multi-sentence ASR pack default **20** / max **30** + **90s** duration valve
+  - Block ASR failure → per-block VAD fallback; **fail-closed** (save only if fully successful)
+  - Batch translate + few-shot `|||`; new session `offsetMs = 0`, `Re` title, shared audio
+- History multi-select: toolbar **Select** button; swipes only select/deselect **inside** multi-select (no scroll misfires); long-press still edits a line
+- Offline VAD packer: duration hard cap ~30s; default batch size 15 (live file/old offline helpers)
+- ASR stream merger: suffix/prefix overlap dedupe (reduces repeated tail phrases)
+- versionName **1.2.1-beta** (versionCode 6)
+
 ## 1.2.0
 
 - Default UI language applies English on first launch (no longer follows system Chinese while Settings shows English)

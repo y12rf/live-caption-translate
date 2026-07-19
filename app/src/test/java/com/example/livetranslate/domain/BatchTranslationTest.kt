@@ -51,6 +51,39 @@ class BatchTranslationTest {
         assertTrue(BatchTranslation.hadCountMismatch(raw, 2))
     }
 
+    /**
+     * Regression: wrong ||| count must be a mismatch even if line count == expected.
+     * Old logic returned false and accepted a shifted parse (first block "gone").
+     */
+    @Test
+    fun hadCountMismatch_delimiterWrong_evenIfLineCountMatches() {
+        val raw = """
+            T1
+            T2|||T3
+            T4
+            T5
+        """.trimIndent()
+        // 5 non-empty lines, but only 2 delimiter parts
+        assertTrue(BatchTranslation.hadCountMismatch(raw, 5))
+        val parts = BatchTranslation.parseTranslations(raw, 5)
+        assertEquals(5, parts.size)
+        // pad path — first two hold merged text, rest blank
+        assertTrue(parts[0].contains("T1"))
+        assertTrue(parts[2].isEmpty())
+    }
+
+    @Test
+    fun hasSuspiciousDuplicates_detectsLoop() {
+        val parts = listOf("同一句", "同一句", "同一句", "另一句", "同一句")
+        assertTrue(BatchTranslation.hasSuspiciousDuplicates(parts))
+        assertFalse(
+            BatchTranslation.hasSuspiciousDuplicates(listOf("a", "b", "c", "d"))
+        )
+        assertFalse(
+            BatchTranslation.hasSuspiciousDuplicates(listOf("x", "x")) // too few
+        )
+    }
+
     @Test
     fun chunkSources_batches() {
         val src = (1..25).map { "s$it" }
@@ -73,5 +106,36 @@ class BatchTranslationTest {
         assertTrue(user.contains("Hello${BatchTranslation.DELIMITER}World"))
         assertTrue(user.contains("History"))
         assertTrue(user.contains("Hi"))
+    }
+
+    @Test
+    fun buildMessages_reprocessFewShotContainsDelimiterExamples() {
+        val settings = UserSettings(inputLanguage = "en", outputLanguage = "zh")
+        val (system, _) = BatchTranslation.buildMessages(
+            sources = listOf("Hello", "World"),
+            context = emptyList(),
+            settings = settings,
+            requireNonEmptySlots = true
+        )
+        assertTrue(system.contains("Few-shot"))
+        assertTrue(system.contains(BatchTranslation.DELIMITER))
+        assertTrue(system.contains("Never leave a translation segment empty"))
+        assertTrue(system.contains("Example 1"))
+    }
+
+    @Test
+    fun isBatchFullySuccessful_requiresAllNonBlank() {
+        assertTrue(BatchTranslation.isBatchFullySuccessful(listOf("a", "b"), 2))
+        assertFalse(BatchTranslation.isBatchFullySuccessful(listOf("a", ""), 2))
+        assertFalse(BatchTranslation.isBatchFullySuccessful(listOf("a", "b", "c"), 2))
+        assertFalse(
+            BatchTranslation.isBatchFullySuccessful(listOf("x", "x", "x", "y"), 4)
+        )
+    }
+
+    @Test
+    fun isRawBatchFullySuccessful() {
+        assertTrue(BatchTranslation.isRawBatchFullySuccessful("你好|||世界", 2))
+        assertFalse(BatchTranslation.isRawBatchFullySuccessful("only one", 2))
     }
 }

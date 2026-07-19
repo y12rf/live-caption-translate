@@ -77,10 +77,11 @@ data class UserSettings(
     val sileroVadMode: String = SileroVadMode.NORMAL.name,
     val contextWindowSize: Int = 2,
     /**
-     * Offline file / reprocess: VAD sentences packed into one ASR request.
-     * Default 70.
+     * Offline file / reprocess: max VAD sentences packed into one ASR request
+     * (also hard-capped by ~30s PCM duration in [com.example.livetranslate.data.audio.WavChunker]).
+     * Default 15 — large packs (old default 70) often drop the opening and loop phrases.
      */
-    val offlineVadBatchSize: Int = 70,
+    val offlineVadBatchSize: Int = 15,
     /** Generate LLM session title after this many completed turns. */
     val titleTurnThreshold: Int = 10,
     /** ASR/LLM automatic retry attempts (1–10). */

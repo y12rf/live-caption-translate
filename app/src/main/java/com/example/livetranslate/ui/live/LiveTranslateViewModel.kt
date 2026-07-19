@@ -11,7 +11,7 @@ import com.example.livetranslate.data.settings.SettingsRepository
 import com.example.livetranslate.data.settings.UserSettings
 import com.example.livetranslate.di.AppContainer
 import com.example.livetranslate.domain.LiveSessionUiState
-import com.example.livetranslate.domain.OfflineReprocessPipeline
+import com.example.livetranslate.domain.ReprocessEngine
 import com.example.livetranslate.domain.ReprocessTitle
 import com.example.livetranslate.domain.ReprocessUiState
 import com.example.livetranslate.domain.SessionController
@@ -27,7 +27,7 @@ import kotlinx.coroutines.launch
 class LiveTranslateViewModel(
     app: Application,
     private val controller: SessionController,
-    private val reprocess: OfflineReprocessPipeline,
+    private val reprocess: ReprocessEngine,
     settingsRepo: SettingsRepository
 ) : AndroidViewModel(app) {
 
@@ -60,7 +60,7 @@ class LiveTranslateViewModel(
     /**
      * File source: live recording pipeline with timeline offsets
      * (FFmpeg → energy VAD → same ASR/LLM queues as mic/internal).
-     * Orphan recovery still uses [OfflineReprocessPipeline].
+     * Orphan recovery still uses [ReprocessEngine] (scheme C′).
      */
     fun startFromFile(uri: Uri) {
         _orphanPrompt.value = null

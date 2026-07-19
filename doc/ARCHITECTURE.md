@@ -20,7 +20,7 @@ flowchart TB
 
   subgraph Domain["domain/"]
     Orch["SessionOrchestrator"]
-    Offline["OfflineReprocessPipeline"]
+    Offline["ReprocessEngine"]
     Ctrl["SessionController"]
   end
 
@@ -67,7 +67,7 @@ flowchart TB
 ```
 com.example.livetranslate/
 ├── ui/                 Compose + ViewModel (Live / History / Settings)
-├── domain/             SessionOrchestrator, OfflineReprocessPipeline, models
+├── domain/             SessionOrchestrator, ReprocessEngine, models
 ├── data/
 │   ├── audio/          AudioCapture · Silero · FFmpeg · session WAV · disk queue
 │   ├── asr/            OpenAI transcriptions / chat-audio streaming
@@ -140,21 +140,23 @@ sequenceDiagram
 
 ---
 
-## Offline / history reprocess
+## Offline / history reprocess (scheme C′)
 
 ```mermaid
 flowchart TB
-  H["History session or orphan WAV"] --> RP["OfflineReprocessPipeline"]
-  RP --> SEG["VAD segment / batch"]
-  SEG --> ASR["ASR batch / stream"]
-  ASR --> LLM["LLM translate"]
-  LLM --> SAVE["Soft-skip failures · still save"]
-  SAVE --> ROOM["Room update"]
+  H["History session or orphan WAV"] --> RP["ReprocessEngine"]
+  RP --> WIN["Timeline windows / VAD if no axis"]
+  WIN --> PACK["Pack 20–30 sents · 90s cap"]
+  PACK --> ASR["Multi-utterance ASR · VAD fallback per block"]
+  ASR --> SPLIT["Punctuation split"]
+  SPLIT --> LLM["Batch translate + few-shot |||"]
+  LLM --> SAVE["Save only if fully successful · offsetMs=0"]
+  SAVE --> ROOM["New Room session Re+title"]
 ```
 
-- History: search, export, seek + scrub, **reprocess** ASR/translate.
+- History: search, export, seek + scrub, **reprocess** (new session, shared WAV).
 - Cold start: orphan session WAV → reprocess / discard / later.
-- Offline path can batch many VAD sentences per ASR request (`offlineVadBatchSize`).
+- Accuracy-oriented batch: multi-sent ASR + batch MT; **fail-closed**; no timeline on new session.
 
 ---
 

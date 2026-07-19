@@ -87,6 +87,7 @@
     <string name="history_segment_retranslated">已重译 %1$d · 失败 %2$d</string>
     <string name="history_segment_retranslating">正在重新翻译…</string>
     <string name="history_selection_count">已选 %1$d</string>
+    <string name="history_multi_select">多选</string>
     <string name="history_select_all">全选</string>
     <string name="history_selection_cancel">取消</string>
     <string name="history_segment_llm_key_missing">请先在设置中配置 LLM API Key</string>
@@ -324,8 +325,8 @@
     <string name="settings_info_live_font">主页双语列表字号（sp，10–48）。</string>
     <string name="settings_info_overlay_size">最大宽高（dp）。超过最大高度时内容可滚动。</string>
     <string name="settings_info_overlay_color">十六进制 #RGB / #RRGGBB / #AARRGGBB。背景透明度由「不透明度 %」单独控制（0 = 全透明；若面板不可见仍要点穿下层，请锁定悬浮窗）。</string>
-    <string name="settings_info_pipeline">历史事后重跑与离线打包：\n• VAD 批大小 — 每批 ASR 合并句数（默认 70）\n• 标题阈值 — 满 N 句后生成 LLM 标题\n• 网络重试 — 单次 ASR/LLM 自动重试\n• 翻译缓存 — 会话内缓存容量\n\n失败批次/句子会软跳过，仍保存部分结果。\n主页文件导入走 Silero VAD + 时间轴录音管线（非此离线打包器）。</string>
-    <string name="settings_info_offline_vad_batch">仅离线/重跑：每批打包进一次 ASR 请求的 VAD 句数。</string>
+    <string name="settings_info_pipeline">历史事后重跑与离线打包：\n• VAD 批大小 — 每批 ASR 合并句数上限（默认 15；另硬限制约 30 秒 PCM）\n• 标题阈值 — 满 N 句后生成 LLM 标题\n• 网络重试 — 单次 ASR/LLM 自动重试\n• 翻译缓存 — 会话内缓存容量\n\n失败批次/句子会软跳过，仍保存部分结果。\n主页文件导入走 Silero VAD + 时间轴录音管线（非此离线打包器）。</string>
+    <string name="settings_info_offline_vad_batch">仅离线/重跑：每批打包进一次 ASR 请求的 VAD 句数上限（还会按约 30 秒时长强制切批，避免超长音频丢开头/复读）。</string>
     <string name="settings_info_title_threshold">满 N 句后尝试 LLM 会话标题（实时与文件导入）。</string>
     <string name="settings_info_max_attempts">单次 ASR/LLM 自动重试次数（1–10），指数退避。</string>
     <string name="settings_info_translation_cache">相同原文→译文的会话内缓存。新会话开始时清空。</string>
@@ -337,7 +338,7 @@
     <string name="settings_title_user_prompt_title">标题 user prompt</string>
     <string name="settings_full_url_title">完整 URL</string>
     <string name="settings_pipeline">管线 / 离线</string>
-    <string name="settings_pipeline_info">历史事后重跑与离线打包：\n• VAD 批大小 — 每批 ASR 合并的 VAD 句数（默认 70）\n• 标题阈值 — 满 N 句后生成 LLM 标题\n• 网络重试 — ASR/LLM 自动重试次数\n• 翻译缓存 — 会话内缓存容量\n\n失败项软跳过，仍保存部分结果。\n主页文件导入走能量 VAD + 时间轴录音管线。</string>
+    <string name="settings_pipeline_info">历史事后重跑与离线打包：\n• VAD 批大小 — 每批 ASR 合并的 VAD 句数上限（默认 15；另硬限制约 30 秒 PCM）\n• 标题阈值 — 满 N 句后生成 LLM 标题\n• 网络重试 — ASR/LLM 自动重试次数\n• 翻译缓存 — 会话内缓存容量\n\n失败项软跳过，仍保存部分结果。\n主页文件导入走能量 VAD + 时间轴录音管线。</string>
     <string name="settings_offline_vad_batch">离线 VAD 批大小（句/次 ASR）</string>
     <string name="settings_title_threshold">满 N 句后生成标题</string>
     <string name="settings_max_attempts">网络重试次数</string>

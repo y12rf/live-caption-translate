@@ -6,7 +6,7 @@ import com.example.livetranslate.data.history.HistoryRepository
 import com.example.livetranslate.data.llm.LlmClient
 import com.example.livetranslate.data.network.NetworkMonitor
 import com.example.livetranslate.data.settings.SettingsRepository
-import com.example.livetranslate.domain.OfflineReprocessPipeline
+import com.example.livetranslate.domain.reprocess.ReprocessEngine
 import com.example.livetranslate.domain.SessionController
 import com.example.livetranslate.domain.model.SessionPhase
 import android.util.Log
@@ -56,7 +56,7 @@ class AppContainer(context: Context) {
         network = networkMonitor
     )
 
-    val reprocessPipeline = OfflineReprocessPipeline(
+    val reprocessPipeline = ReprocessEngine(
         appContext = appContext,
         scope = appScope,
         asr = asrClient,

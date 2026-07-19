@@ -36,6 +36,61 @@ object WavPcmReader {
             }
     }
 
+    /**
+     * Read a continuous PCM slice for [startMs, endMs) (recording time).
+     * Frame-aligned to sample boundaries. Empty if range is invalid/zero.
+     */
+    fun readPcmRange(file: File, startMs: Long, endMs: Long): ByteArray {
+        val open = open(file)
+        return open.readPcmRange(startMs, endMs)
+    }
+
+    fun OpenWav.readPcmRange(startMs: Long, endMs: Long): ByteArray {
+        val bytesPerSample = channels * (bitsPerSample / 8)
+        if (bytesPerSample <= 0 || sampleRate <= 0) return ByteArray(0)
+        val frameBytes = bytesPerSample // one sample frame across channels
+        val start = startMs.coerceAtLeast(0L)
+        val end = endMs.coerceAtLeast(start)
+        val startByte = msToByteOffset(start, sampleRate, frameBytes)
+            .coerceIn(0, dataSize.toLong())
+            .let { alignDown(it, frameBytes) }
+        val endByte = msToByteOffset(end, sampleRate, frameBytes)
+            .coerceIn(0, dataSize.toLong())
+            .let { alignDown(it, frameBytes) }
+        val len = (endByte - startByte).toInt().coerceAtLeast(0)
+        if (len <= 0) return ByteArray(0)
+        openPcmStream().use { stream ->
+            skipFully(stream, startByte)
+            val buf = ByteArray(len)
+            readFully(stream, buf)
+            return buf
+        }
+    }
+
+    private fun msToByteOffset(ms: Long, sampleRate: Int, frameBytes: Int): Long {
+        // samples = ms * rate / 1000; bytes = samples * frameBytes
+        return ms * sampleRate.toLong() * frameBytes / 1000L
+    }
+
+    private fun alignDown(value: Long, align: Int): Long {
+        if (align <= 1) return value
+        return value - (value % align)
+    }
+
+    private fun skipFully(input: InputStream, bytes: Long) {
+        var left = bytes
+        while (left > 0) {
+            val skipped = input.skip(left)
+            if (skipped > 0) {
+                left -= skipped
+                continue
+            }
+            // Some streams skip 0; read-and-discard
+            if (input.read() < 0) break
+            left--
+        }
+    }
+
     fun open(file: File): OpenWav {
         if (!file.isFile || file.length() < 44L) {
             throw IllegalArgumentException("无效 WAV：${file.name}")

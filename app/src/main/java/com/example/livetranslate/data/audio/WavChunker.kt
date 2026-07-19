@@ -11,14 +11,24 @@ import java.nio.ByteOrder
 /**
  * Offline ASR batching helpers.
  *
- * Preferred path: Silero VAD → pack every [UTTERANCES_PER_ASR] sentences into one ASR upload.
+ * Preferred path: Silero VAD → pack utterances into one ASR upload, flushed when
+ * either [utterancesPerBatch] is reached **or** packed PCM exceeds [maxBatchDurationMs].
+ * Duration cap is critical: long packs (minutes) cause many ASR models to drop the
+ * opening and loop mid-phrases ("first block missing + repeated chunk").
+ *
  * Legacy time-slice [chunkPcm] remains for tests / fallback.
  */
 object WavChunker {
-    /** VAD sentences packed into one ASR request. */
-    const val UTTERANCES_PER_ASR = 70
+    /** Soft cap on VAD sentences per ASR request (secondary to duration). */
+    const val UTTERANCES_PER_ASR = 15
 
-    /** Legacy fixed-duration slice (ms). */
+    /**
+     * Hard cap on packed PCM duration per ASR request (ms).
+     * Aligns with the original offline design (~30s slices).
+     */
+    const val DEFAULT_MAX_BATCH_DURATION_MS = 30_000L
+
+    /** Legacy fixed-duration slice (ms) for [chunkPcm]. */
     const val DEFAULT_CHUNK_MS = 30_000
 
     data class PcmChunk(
@@ -32,8 +42,7 @@ object WavChunker {
     ) {
         /** Duration of this PCM blob in ms (16-bit mono). */
         val durationMs: Long
-            get() = if (sampleRate <= 0 || pcm.isEmpty()) 0L
-            else (pcm.size / 2L) * 1000L / sampleRate
+            get() = pcmDurationMs(pcm.size, sampleRate)
 
         override fun equals(other: Any?): Boolean {
             if (this === other) return true
@@ -58,39 +67,91 @@ object WavChunker {
     }
 
     /**
-     * Silero VAD over the whole WAV, packing every [utterancesPerBatch] cuts into one ASR blob.
+     * Silero VAD over the whole WAV, packing cuts until count **or** duration cap.
      * Streams VAD output so only one batch of utterances is held in RAM at a time
-     * (avoids OOM on long lectures). Last batch may be shorter than [utterancesPerBatch].
+     * (avoids OOM on long lectures). Last batch may be shorter.
      */
     suspend fun chunkByVad(
         file: File,
         settings: UserSettings,
         appContext: Context,
         utterancesPerBatch: Int = UTTERANCES_PER_ASR,
+        maxBatchDurationMs: Long = DEFAULT_MAX_BATCH_DURATION_MS,
         onProgress: (progress: Float, elapsedMs: Long) -> Unit = { _, _ -> }
     ): List<PcmChunk> {
         require(utterancesPerBatch > 0)
+        require(maxBatchDurationMs > 0)
         val segmenter = FileAudioSegmenter(appContext = appContext)
-        val batch = ArrayList<UtteranceAudio>(utterancesPerBatch)
+        val batch = ArrayList<UtteranceAudio>(utterancesPerBatch.coerceAtMost(32))
         val provisional = ArrayList<PcmChunk>()
         var index = 0
         segmenter.segment(file, settings, onProgress).collect { utt ->
-            batch.add(utt)
-            if (batch.size >= utterancesPerBatch) {
+            if (shouldFlushBeforeAdd(batch, utt, utterancesPerBatch, maxBatchDurationMs)) {
                 provisional.add(packGroup(batch, index, totalPlaceholder = -1))
                 batch.clear()
                 index++
             }
+            batch.add(utt)
         }
         if (batch.isNotEmpty()) {
             provisional.add(packGroup(batch, index, totalPlaceholder = -1))
             batch.clear()
         }
+        return finalizeTotals(provisional)
+    }
+
+    /**
+     * Pack already-cut VAD utterances into ASR batches by count and/or duration.
+     */
+    fun packVadUtterances(
+        utterances: List<UtteranceAudio>,
+        utterancesPerBatch: Int = UTTERANCES_PER_ASR,
+        maxBatchDurationMs: Long = DEFAULT_MAX_BATCH_DURATION_MS
+    ): List<PcmChunk> {
+        require(utterancesPerBatch > 0)
+        require(maxBatchDurationMs > 0)
+        if (utterances.isEmpty()) return emptyList()
+        val batch = ArrayList<UtteranceAudio>(utterancesPerBatch.coerceAtMost(32))
+        val provisional = ArrayList<PcmChunk>()
+        var index = 0
+        for (utt in utterances) {
+            if (shouldFlushBeforeAdd(batch, utt, utterancesPerBatch, maxBatchDurationMs)) {
+                provisional.add(packGroup(batch, index, totalPlaceholder = -1))
+                batch.clear()
+                index++
+            }
+            batch.add(utt)
+        }
+        if (batch.isNotEmpty()) {
+            provisional.add(packGroup(batch, index, totalPlaceholder = -1))
+        }
+        return finalizeTotals(provisional)
+    }
+
+    /**
+     * Flush current batch before adding [next] when count is full, or when packed
+     * duration would exceed [maxBatchDurationMs]. A single utterance longer than
+     * the cap is still emitted alone (cannot split further here).
+     */
+    internal fun shouldFlushBeforeAdd(
+        batch: List<UtteranceAudio>,
+        next: UtteranceAudio,
+        utterancesPerBatch: Int,
+        maxBatchDurationMs: Long
+    ): Boolean {
+        if (batch.isEmpty()) return false
+        if (batch.size >= utterancesPerBatch) return true
+        val rate = batch.first().sampleRate.takeIf { it > 0 } ?: next.sampleRate
+        if (rate <= 0) return batch.size >= utterancesPerBatch
+        val batchMs = pcmDurationMs(batch.sumOf { it.pcm.size }, rate)
+        val nextMs = pcmDurationMs(next.pcm.size, next.sampleRate.takeIf { it > 0 } ?: rate)
+        return batchMs + nextMs > maxBatchDurationMs
+    }
+
+    private fun finalizeTotals(provisional: List<PcmChunk>): List<PcmChunk> {
         val total = provisional.size
         if (total == 0) return emptyList()
-        return provisional.map { c ->
-            c.copy(total = total) // re-wrap to fix total; pcm shared is fine
-        }.mapIndexed { i, c ->
+        return provisional.mapIndexed { i, c ->
             PcmChunk(
                 pcm = c.pcm,
                 sampleRate = c.sampleRate,
@@ -99,21 +160,6 @@ object WavChunker {
                 startMs = c.startMs,
                 utteranceCount = c.utteranceCount
             )
-        }
-    }
-
-    /**
-     * Pack already-cut VAD utterances into ASR batches of [utterancesPerBatch].
-     */
-    fun packVadUtterances(
-        utterances: List<UtteranceAudio>,
-        utterancesPerBatch: Int = UTTERANCES_PER_ASR
-    ): List<PcmChunk> {
-        require(utterancesPerBatch > 0)
-        if (utterances.isEmpty()) return emptyList()
-        val groups = utterances.chunked(utterancesPerBatch)
-        return groups.mapIndexed { index, group ->
-            packGroup(group, index, totalPlaceholder = groups.size)
         }
     }
 
@@ -138,6 +184,12 @@ object WavChunker {
             startMs = group.first().offsetMs.coerceAtLeast(0L),
             utteranceCount = group.size
         )
+    }
+
+    /** 16-bit mono PCM duration in ms. */
+    fun pcmDurationMs(byteCount: Int, sampleRate: Int): Long {
+        if (sampleRate <= 0 || byteCount <= 0) return 0L
+        return (byteCount / 2L) * 1000L / sampleRate
     }
 
     /**

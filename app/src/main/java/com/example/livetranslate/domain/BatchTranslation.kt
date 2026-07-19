@@ -21,11 +21,15 @@ object BatchTranslation {
     /**
      * Build system + user messages for a batch translate.
      * [sources] must be non-empty, already trimmed non-blank lines.
+     *
+     * @param requireNonEmptySlots when true (reprocess C′), forbid empty translation slots
+     *        and include few-shot examples that demonstrate [DELIMITER] alignment.
      */
     fun buildMessages(
         sources: List<String>,
         context: List<ContextTurn>,
-        settings: UserSettings
+        settings: UserSettings,
+        requireNonEmptySlots: Boolean = false
     ): Pair<String, String> {
         require(sources.isNotEmpty()) { "sources empty" }
         val from = settings.inputLanguage.trim().ifBlank { "source" }
@@ -37,6 +41,29 @@ object BatchTranslation {
             context.joinToString("\n") { turn ->
                 "[$from] ${turn.source}\n[$to] ${turn.translation}"
             }
+        }
+
+        val emptyRule = if (requireNonEmptySlots) {
+            "6. Never leave a translation segment empty — every slot must contain a real $to translation."
+        } else {
+            "6. Skip pure fillers / false starts when they are the whole segment — leave that translation empty but still keep the delimiter so the count stays ${sources.size}."
+        }
+
+        val fewShot = if (requireNonEmptySlots) {
+            """
+
+            Few-shot examples (follow the same delimiter format exactly):
+
+            Example 1 — 2 segments:
+            Source: Hello everyone.${DELIMITER}Welcome to the lecture.
+            Output: 大家好。${DELIMITER}欢迎来到本次讲座。
+
+            Example 2 — 3 segments:
+            Source: We will start with an overview.${DELIMITER}Please hold your questions.${DELIMITER}Thank you.
+            Output: 我们先从概述开始。${DELIMITER}请先保留问题。${DELIMITER}谢谢。
+            """.trimIndent()
+        } else {
+            ""
         }
 
         val system = """
@@ -51,9 +78,10 @@ object BatchTranslation {
             3. Separate consecutive translations with the exact delimiter $DELIMITER (no spaces required around it; newlines around it are OK).
             4. Do not translate or copy the delimiter itself; never invent extra segments.
             5. Prefer natural, idiomatic $to; stay faithful to meaning; keep names and technical terms accurate.
-            6. Skip pure fillers / false starts when they are the whole segment — leave that translation empty but still keep the delimiter so the count stays ${sources.size}.
+            $emptyRule
             7. You may lightly repair obvious ASR errors using context; never invent content.
             8. When the glossary is non-empty, follow it strictly for listed terms.
+            $fewShot
 
             Glossary (must follow when non-empty; may be empty):
             $glossary
@@ -75,40 +103,33 @@ object BatchTranslation {
     }
 
     /**
+     * Fail-closed success for reprocess batch translate:
+     * exact count, every slot non-blank, no suspicious duplicate loop.
+     */
+    fun isBatchFullySuccessful(parts: List<String>, expected: Int): Boolean {
+        if (expected <= 0 || parts.size != expected) return false
+        if (parts.any { it.trim().isEmpty() }) return false
+        if (hasSuspiciousDuplicates(parts)) return false
+        return true
+    }
+
+    /** Whether [raw] parses to a fully successful batch of [expected] slots. */
+    fun isRawBatchFullySuccessful(raw: String, expected: Int): Boolean {
+        if (hadCountMismatch(raw, expected)) return false
+        return isBatchFullySuccessful(parseTranslations(raw, expected), expected)
+    }
+
+    /**
      * Split model output into [expected] translations.
      * Tolerates optional whitespace / newlines around [DELIMITER].
      * On count mismatch: truncate extras, pad missing with blank.
+     *
+     * Parsing rules must stay in lockstep with [hadCountMismatch] — the latter
+     * must not claim "OK" when this path would pad/truncate.
      */
     fun parseTranslations(raw: String, expected: Int): List<String> {
         require(expected > 0)
-        val cleaned = raw
-            .replace("\r\n", "\n")
-            .trim()
-        if (cleaned.isEmpty()) {
-            return List(expected) { "" }
-        }
-
-        // Primary: delimiter split (allow whitespace around |||)
-        var parts = cleaned
-            .split(Regex("""\s*${Regex.escape(DELIMITER)}\s*"""))
-            .map { it.trim() }
-
-        // If model ignored delimiter and used one-per-line with exact count, accept that.
-        if (parts.size == 1 && expected > 1) {
-            val lines = cleaned.lines().map { it.trim() }.filter { it.isNotEmpty() }
-            if (lines.size == expected) {
-                parts = lines
-            }
-        }
-
-        // Strip accidental leading/trailing empty from delimiter edges
-        while (parts.size > expected && parts.first().isEmpty()) {
-            parts = parts.drop(1)
-        }
-        while (parts.size > expected && parts.last().isEmpty()) {
-            parts = parts.dropLast(1)
-        }
-
+        val parts = splitRaw(raw, expected) ?: return List(expected) { "" }
         return when {
             parts.size == expected -> parts
             parts.size > expected -> parts.take(expected)
@@ -123,20 +144,60 @@ object BatchTranslation {
     }
 
     /**
-     * True when neither delimiter-split nor line-split produced exactly [expected] non-empty parts
-     * before pad/truncate (model may still be usable after [parseTranslations]).
+     * True when [parseTranslations] would need pad/truncate (segment count ≠ expected
+     * after the same delimiter / line-fallback rules).
+     *
+     * Important: line-count coincidence must **not** override a wrong delimiter split —
+     * that used to mark mismatch=false while parse still used the bad `|||` parts,
+     * shifting later sentences and making the first translation look "gone".
      */
     fun hadCountMismatch(raw: String, expected: Int): Boolean {
         if (expected <= 0) return false
+        val parts = splitRaw(raw, expected) ?: return expected > 0
+        return parts.size != expected
+    }
+
+    /**
+     * Detect batch replies where count matches but content is shifted/looped
+     * (same translation repeated many times). Forces single-sentence fallback.
+     */
+    fun hasSuspiciousDuplicates(parts: List<String>): Boolean {
+        val nonBlank = parts.map { it.trim() }.filter { it.isNotEmpty() }
+        if (nonBlank.size < 3) return false
+        val freq = nonBlank.groupingBy { it }.eachCount()
+        val maxFreq = freq.values.maxOrNull() ?: 0
+        // ≥3 identical slots, and at least half the batch is that same string
+        return maxFreq >= 3 && maxFreq * 2 >= nonBlank.size
+    }
+
+    /**
+     * Shared split used by parse + mismatch detection.
+     * @return null when [raw] is blank after trim
+     */
+    private fun splitRaw(raw: String, expected: Int): List<String>? {
         val cleaned = raw.replace("\r\n", "\n").trim()
-        if (cleaned.isEmpty()) return expected > 0
-        var delim = cleaned
+        if (cleaned.isEmpty()) return null
+
+        var parts = cleaned
             .split(Regex("""\s*${Regex.escape(DELIMITER)}\s*"""))
             .map { it.trim() }
-        while (delim.size > 1 && delim.first().isEmpty()) delim = delim.drop(1)
-        while (delim.size > 1 && delim.last().isEmpty()) delim = delim.dropLast(1)
-        if (delim.size == expected) return false
-        val lines = cleaned.lines().map { it.trim() }.filter { it.isNotEmpty() }
-        return lines.size != expected
+
+        // Line fallback only when the model ignored the delimiter entirely.
+        if (parts.size == 1 && expected > 1) {
+            val lines = cleaned.lines().map { it.trim() }.filter { it.isNotEmpty() }
+            if (lines.size == expected) {
+                parts = lines
+            }
+        }
+
+        // Strip accidental leading/trailing empty from delimiter edges
+        // (e.g. output started/ended with |||). Only while oversized.
+        while (parts.size > expected && parts.first().isEmpty()) {
+            parts = parts.drop(1)
+        }
+        while (parts.size > expected && parts.last().isEmpty()) {
+            parts = parts.dropLast(1)
+        }
+        return parts
     }
 }

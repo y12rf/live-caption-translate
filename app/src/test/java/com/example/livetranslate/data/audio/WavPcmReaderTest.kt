@@ -40,6 +40,18 @@ class WavPcmReaderTest {
         }
     }
 
+    @Test
+    fun readPcmRange_middleSlice() {
+        // 200ms @ 16k mono 16-bit = 6400 bytes
+        val pcm = ByteArray(6400) { i -> (i % 127).toByte() }
+        val file = writeWav(pcm, sampleRate = 16_000)
+        // 50ms..150ms = 100ms = 3200 bytes
+        val slice = WavPcmReader.readPcmRange(file, 50L, 150L)
+        assertEquals(3200, slice.size)
+        val expected = pcm.copyOfRange(1600, 4800) // 50ms=1600 bytes
+        assertTrue(slice.contentEquals(expected))
+    }
+
     private fun writeWav(pcm: ByteArray, sampleRate: Int): File {
         val f = tmp.newFile("t_${pcm.size}.wav")
         val header = WavEncoder.buildHeader(pcm.size, sampleRate)

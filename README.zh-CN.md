@@ -1,6 +1,6 @@
 # Live Translate（实时翻译）
 
-**v1.2.0** · 语音 → 流式识别 → 流式翻译 · [MIT](LICENSE)
+**v1.2.1-beta** · 语音 → 流式识别 → 流式翻译 · [MIT](LICENSE)
 
 [English](README.md) · **中文**
 

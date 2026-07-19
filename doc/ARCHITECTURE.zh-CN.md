@@ -20,7 +20,7 @@ flowchart TB
 
   subgraph Domain["domain/"]
     Orch["SessionOrchestrator"]
-    Offline["OfflineReprocessPipeline"]
+    Offline["ReprocessEngine"]
     Ctrl["SessionController"]
   end
 
@@ -67,7 +67,7 @@ flowchart TB
 ```
 com.example.livetranslate/
 ├── ui/                 Compose + ViewModel（实时 / 历史 / 设置）
-├── domain/             SessionOrchestrator、OfflineReprocessPipeline、模型
+├── domain/             SessionOrchestrator、ReprocessEngine、模型
 ├── data/
 │   ├── audio/          AudioCapture · Silero · FFmpeg · 会话 WAV · 磁盘队列
 │   ├── asr/            OpenAI transcriptions / chat-audio 流式
@@ -140,21 +140,23 @@ sequenceDiagram
 
 ---
 
-## 离线 / 历史重跑
+## 离线 / 历史重跑（方案 C′）
 
 ```mermaid
 flowchart TB
-  H["历史会话或孤儿 WAV"] --> RP["OfflineReprocessPipeline"]
-  RP --> SEG["VAD 切段 / 批处理"]
-  SEG --> ASR["ASR 批处理 / 流式"]
-  ASR --> LLM["LLM 翻译"]
-  LLM --> SAVE["失败软跳过 · 仍保存"]
-  SAVE --> ROOM["更新 Room"]
+  H["历史会话或孤儿 WAV"] --> RP["ReprocessEngine"]
+  RP --> WIN["历史 offset 切窗 / 无轴则 VAD"]
+  WIN --> PACK["打包 20~30 句 · 90s 阀"]
+  PACK --> ASR["多句 ASR · 块失败 VAD 兜底"]
+  ASR --> SPLIT["标点切句"]
+  SPLIT --> LLM["批译 + few-shot |||"]
+  LLM --> SAVE["全成功才入库 · offsetMs=0"]
+  SAVE --> ROOM["新建 Room 会话 Re+标题"]
 ```
 
-- 历史：搜索、导出、进度跳转与 scrub、**重新识别 / 翻译**。
+- 历史：搜索、导出、进度跳转与 scrub、**重新识别翻译**（新建会话，共享 WAV）。
 - 冷启动：发现孤儿会话 WAV → 重跑 / 丢弃 / 稍后。
-- 离线路径可将多句 VAD 结果打包进一次 ASR 请求（`offlineVadBatchSize`）。
+- 重跑为准确度向批处理：多句 ASR + 批译；**fail-closed**；新会话无时间轴。
 
 ---
 

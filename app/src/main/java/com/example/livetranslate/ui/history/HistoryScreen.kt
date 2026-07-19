@@ -4,7 +4,8 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.ExperimentalFoundationApi
-import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -51,7 +52,6 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -61,8 +61,10 @@ import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.input.pointer.positionChange
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
@@ -80,6 +82,7 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 import java.util.concurrent.TimeUnit
+import kotlin.math.abs
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
@@ -559,6 +562,9 @@ fun HistoryDetailScreen(
                             }
                         }
                     } else {
+                        TextButton(onClick = { viewModel.enterSelectionMode() }) {
+                            Text(stringResource(R.string.history_multi_select))
+                        }
                         IconButton(onClick = { detailSearchOpen = true }) {
                             Icon(
                                 Icons.Default.Search,
@@ -961,30 +967,62 @@ private fun TimelineSegmentRow(
     onDelete: () -> Unit,
     onRetranslate: () -> Unit
 ) {
-    var dragAccum by remember(seg.id) { mutableFloatStateOf(0f) }
     var menuOpen by remember(seg.id) { mutableStateOf(false) }
-    val swipeThreshold = 72f
+    // Swipe only active in multi-select: right = select, left = deselect.
+    // Outside multi-select, no horizontal handler (scroll free; enter via toolbar「多选」).
+    val swipeThresholdPx = with(LocalDensity.current) { 96.dp.toPx() }
 
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .pointerInput(seg.id, selectionMode) {
-                detectHorizontalDragGestures(
-                    onDragStart = { dragAccum = 0f },
-                    onDragEnd = {
-                        when {
-                            dragAccum >= swipeThreshold -> onSwipeSelect()
-                            dragAccum <= -swipeThreshold -> {
-                                if (selectionMode) onSwipeDeselect()
-                                else menuOpen = true
+            .then(
+                if (selectionMode) {
+                    Modifier.pointerInput(seg.id, swipeThresholdPx) {
+                        awaitEachGesture {
+                            val down = awaitFirstDown(requireUnconsumed = false)
+                            var totalX = 0f
+                            var totalY = 0f
+                            var horizontalLock: Boolean? = null
+                            val touchSlop = viewConfiguration.touchSlop
+                            val pointerId = down.id
+                            while (true) {
+                                val event = awaitPointerEvent()
+                                val change =
+                                    event.changes.firstOrNull { it.id == pointerId } ?: break
+                                if (!change.pressed) {
+                                    if (horizontalLock == true) {
+                                        when {
+                                            totalX >= swipeThresholdPx -> onSwipeSelect()
+                                            totalX <= -swipeThresholdPx -> onSwipeDeselect()
+                                        }
+                                    }
+                                    break
+                                }
+                                val delta = change.positionChange()
+                                totalX += delta.x
+                                totalY += delta.y
+                                when (horizontalLock) {
+                                    null -> {
+                                        val dist = abs(totalX) + abs(totalY)
+                                        if (dist >= touchSlop * 2f) {
+                                            if (abs(totalX) >= abs(totalY) * 2.5f) {
+                                                horizontalLock = true
+                                                change.consume()
+                                            } else {
+                                                break
+                                            }
+                                        }
+                                    }
+                                    true -> change.consume()
+                                    false -> break
+                                }
                             }
                         }
-                        dragAccum = 0f
-                    },
-                    onDragCancel = { dragAccum = 0f },
-                    onHorizontalDrag = { _, dx -> dragAccum += dx }
-                )
-            }
+                    }
+                } else {
+                    Modifier
+                }
+            )
             .combinedClickable(
                 onClick = onClick,
                 onLongClick = onLongClick
