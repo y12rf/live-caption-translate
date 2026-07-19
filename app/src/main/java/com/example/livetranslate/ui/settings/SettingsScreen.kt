@@ -762,6 +762,20 @@ private fun AudioPipelineCategoryContent(
         }
     )
     field(
+        label = labels.asrApiIntervalLabel,
+        value = d.asrApiIntervalMs.toString(),
+        onChange = {
+            it.toIntOrNull()?.let { v -> onUpdate { s -> s.copy(asrApiIntervalMs = v) } }
+        }
+    )
+    field(
+        label = labels.llmApiIntervalLabel,
+        value = d.llmApiIntervalMs.toString(),
+        onChange = {
+            it.toIntOrNull()?.let { v -> onUpdate { s -> s.copy(llmApiIntervalMs = v) } }
+        }
+    )
+    field(
         label = labels.translationCacheLabel,
         value = d.translationCacheMax.toString(),
         onChange = {
@@ -776,6 +790,8 @@ private fun AudioPipelineCategoryContent(
                     offlineVadBatchSize = def.offlineVadBatchSize,
                     titleTurnThreshold = def.titleTurnThreshold,
                     maxNetworkAttempts = def.maxNetworkAttempts,
+                    asrApiIntervalMs = def.asrApiIntervalMs,
+                    llmApiIntervalMs = def.llmApiIntervalMs,
                     translationCacheMax = def.translationCacheMax
                 )
             }
@@ -1101,6 +1117,8 @@ private data class SettingsLabels(
     val offlineBatchLabel: String,
     val titleThresholdLabel: String,
     val maxAttemptsLabel: String,
+    val asrApiIntervalLabel: String,
+    val llmApiIntervalLabel: String,
     val translationCacheLabel: String,
     val keepScreenLabel: String,
     val immersiveLabel: String,
@@ -1125,6 +1143,8 @@ private data class SettingsLabels(
     val offlineBatchInfo: String,
     val titleThresholdInfo: String,
     val maxAttemptsInfo: String,
+    val asrApiIntervalInfo: String,
+    val llmApiIntervalInfo: String,
     val cacheMaxInfo: String,
     val displayTitle: String,
     val displayInfo: String,
@@ -1206,6 +1226,8 @@ private fun rememberSettingsLabels(): SettingsLabels = SettingsLabels(
     offlineBatchLabel = stringResource(R.string.settings_offline_vad_batch),
     titleThresholdLabel = stringResource(R.string.settings_title_threshold),
     maxAttemptsLabel = stringResource(R.string.settings_max_attempts),
+    asrApiIntervalLabel = stringResource(R.string.settings_asr_api_interval),
+    llmApiIntervalLabel = stringResource(R.string.settings_llm_api_interval),
     translationCacheLabel = stringResource(R.string.settings_translation_cache),
     keepScreenLabel = stringResource(R.string.settings_keep_screen_on),
     immersiveLabel = stringResource(R.string.settings_immersive),
@@ -1230,6 +1252,8 @@ private fun rememberSettingsLabels(): SettingsLabels = SettingsLabels(
     offlineBatchInfo = stringResource(R.string.settings_info_offline_vad_batch),
     titleThresholdInfo = stringResource(R.string.settings_info_title_threshold),
     maxAttemptsInfo = stringResource(R.string.settings_info_max_attempts),
+    asrApiIntervalInfo = stringResource(R.string.settings_info_asr_api_interval),
+    llmApiIntervalInfo = stringResource(R.string.settings_info_llm_api_interval),
     cacheMaxInfo = stringResource(R.string.settings_info_translation_cache),
     displayTitle = stringResource(R.string.settings_display),
     displayInfo = stringResource(R.string.settings_display_info),

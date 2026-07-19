@@ -342,6 +342,8 @@
     <string name="settings_info_offline_vad_batch">Offline/reprocess only: max VAD sentences packed into one ASR request (also flushed at ~30s to avoid drop-start / loop artifacts on long audio).</string>
     <string name="settings_info_title_threshold">After this many completed turns, try LLM session title (live &amp; file import).</string>
     <string name="settings_info_max_attempts">Automatic retries per ASR/LLM request (1–10) with exponential backoff.</string>
+    <string name="settings_info_asr_api_interval">Minimum milliseconds between successive ASR request starts (0–60000). 0 = no delay. Applies to live, file import, and reprocess (including retries).</string>
+    <string name="settings_info_llm_api_interval">Minimum milliseconds between successive LLM request starts (0–60000). 0 = no delay. Applies to translate, batch translate, and session title (cache hits skip the wait).</string>
     <string name="settings_info_translation_cache">In-session cache of identical source→translation pairs. Cleared when a new session starts.</string>
     <string name="settings_info_keep_screen_on">Keeps the Live screen awake while this option is on.</string>
     <string name="settings_info_immersive">Hides status/navigation bars on the Live screen (swipe edge to show briefly). Full bilingual-only immersive is entered via the fullscreen button in the Live top bar.</string>
@@ -351,10 +353,12 @@
     <string name="settings_title_user_prompt_title">Title user prompt</string>
     <string name="settings_full_url_title">Full URL</string>
     <string name="settings_pipeline">Pipeline / offline</string>
-    <string name="settings_pipeline_info">History reprocess &amp; offline packing:\n• VAD batch size — max sentences packed per ASR call (default 15; also hard-capped ~30s PCM)\n• Title threshold — LLM title after N turns\n• Network retries — ASR/LLM auto retries\n• Translation cache — session cache size\n\nFailed ASR/LLM items soft-skip; partial sessions are still saved.\nLive file import uses energy VAD + timeline (recording pipeline).</string>
+    <string name="settings_pipeline_info">History reprocess &amp; offline packing:\n• VAD batch size — max sentences packed per ASR call (default 15; also hard-capped ~30s PCM)\n• Title threshold — LLM title after N turns\n• Network retries — ASR/LLM auto retries\n• ASR/LLM interval — min gap between API starts (ms)\n• Translation cache — session cache size\n\nFailed ASR/LLM items soft-skip; partial sessions are still saved.\nLive file import uses energy VAD + timeline (recording pipeline).</string>
     <string name="settings_offline_vad_batch">Offline VAD batch (sentences / ASR)</string>
     <string name="settings_title_threshold">Title after N turns</string>
     <string name="settings_max_attempts">Network retry attempts</string>
+    <string name="settings_asr_api_interval">ASR call interval (ms)</string>
+    <string name="settings_llm_api_interval">LLM call interval (ms)</string>
     <string name="settings_translation_cache">Translation cache max</string>
     <string name="settings_display">Display</string>
     <string name="settings_display_info">Live screen options:\n• Keep screen on — prevents sleep during listening\n• Hide system bars — swipe edge to show briefly\n• ASR-only — recognize without translating\n\nEnter full-screen bilingual view from the fullscreen button in the Live top bar.</string>

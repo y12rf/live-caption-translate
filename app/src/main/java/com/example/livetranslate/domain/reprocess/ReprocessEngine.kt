@@ -13,12 +13,12 @@ import com.example.livetranslate.data.history.HistoryRepository
 import com.example.livetranslate.data.llm.LlmClient
 import com.example.livetranslate.data.llm.LlmConfig
 import com.example.livetranslate.data.llm.LlmThinkingMode
+import com.example.livetranslate.data.network.ApiCallThrottle
 import com.example.livetranslate.data.network.NetworkErrors
 import com.example.livetranslate.data.network.NetworkMonitor
 import com.example.livetranslate.data.settings.SettingsRepository
 import com.example.livetranslate.data.settings.UserSettings
 import com.example.livetranslate.domain.BatchTranslation
-import com.example.livetranslate.domain.PunctuationSegmenter
 import com.example.livetranslate.domain.ReprocessTitle
 import com.example.livetranslate.domain.model.AsrStreamEvent
 import com.example.livetranslate.domain.model.ContextTurn
@@ -42,8 +42,13 @@ import java.io.File
 import java.util.concurrent.atomic.AtomicBoolean
 
 /**
- * Scheme C′ offline reprocess:
- * history timeline windows → multi-sentence ASR (20/30 + 90s) → punctuation split →
+ * Scheme C′ offline reprocess orchestration (UI + I/O + network).
+ *
+ * Pure cut / text stages live in:
+ * - [HistoryReprocessPlanner] — timeline|VAD windows → ASR blocks
+ * - [HistoryReprocessText] — join ASR → punctuation split → segment rows
+ *
+ * Flow: plan → multi-sentence ASR (20/30 + 90s) → punctuation split →
  * batch translate with few-shot ||| → save only if fully successful (offsetMs = 0).
  *
  * Block ASR failure → file-import style VAD on that slice; still fail-closed if fallback fails.
@@ -64,6 +69,8 @@ class ReprocessEngine(
 
     private var job: Job? = null
     private val cancelRequested = AtomicBoolean(false)
+    private val asrThrottle = ApiCallThrottle()
+    private val llmThrottle = ApiCallThrottle()
 
     val isBusy: Boolean
         get() = _state.value.phase == ReprocessPhase.Running ||
@@ -158,18 +165,10 @@ class ReprocessEngine(
         }
 
         checkCancel()
-        val windows = buildWindows(file, settings, segmentOffsets, durationMs)
-        if (windows.isEmpty()) {
-            throw Exception(str(R.string.offline_no_pcm))
-        }
-
-        // C′: default 20 / max 30 / 90s (settings offlineVadBatchSize ignored for reprocess)
-        val packPolicy = AsrPackPolicy.Default
-
-        val blocks = AsrBlockPacker.pack(windows, packPolicy)
-        if (blocks.isEmpty()) {
-            throw Exception(str(R.string.offline_no_pcm))
-        }
+        // History path: offsets → windows → blocks. Orphan: VAD windows → blocks.
+        // C′ pack policy is fixed (settings offlineVadBatchSize ignored).
+        val plan = buildCutPlan(file, settings, segmentOffsets, durationMs)
+        val blocks = plan.blocks
 
         val blockTexts = ArrayList<String>(blocks.size)
         for (block in blocks) {
@@ -191,35 +190,26 @@ class ReprocessEngine(
             blockTexts.add(text)
         }
 
-        val fullText = blockTexts.joinToString(" ").trim()
+        val fullText = try {
+            HistoryReprocessText.joinBlockTranscripts(blockTexts)
+        } catch (_: Exception) {
+            ""
+        }
         if (fullText.isBlank()) {
             throw Exception(str(R.string.offline_asr_empty))
         }
 
-        var sources = PunctuationSegmenter.split(fullText)
-        if (sources.isEmpty()) {
-            sources = listOf(fullText)
-        }
-        sources = sources.map { it.trim() }.filter { it.isNotEmpty() }
-        if (sources.isEmpty()) {
+        val sources = try {
+            HistoryReprocessText.splitSources(fullText)
+        } catch (_: Exception) {
             throw Exception(str(R.string.offline_split_empty))
         }
 
         checkCancel()
-        val segments: List<TranscriptSegment>
-        if (settings.asrOnlyMode) {
-            segments = sources.map { src ->
-                TranscriptSegment(
-                    source = src,
-                    translation = "",
-                    cutReason = CutReason.Silence,
-                    incomplete = false,
-                    timestampMs = System.currentTimeMillis(),
-                    offsetMs = 0L
-                )
-            }
+        val segments: List<TranscriptSegment> = if (settings.asrOnlyMode) {
+            HistoryReprocessText.asrOnlySegments(sources)
         } else {
-            segments = translateAll(sources, settings)
+            translateAll(sources, settings)
         }
 
         checkCancel()
@@ -252,17 +242,25 @@ class ReprocessEngine(
         )
     }
 
-    private suspend fun buildWindows(
+    /**
+     * Build the C′ cut plan via [HistoryReprocessPlanner].
+     * Prefer history timeline; fall back to full-file VAD windows (orphan).
+     */
+    private suspend fun buildCutPlan(
         file: File,
         settings: UserSettings,
         segmentOffsets: List<Long>,
         durationMs: Long
-    ): List<TimeWindow> {
-        if (TimelineWindowBuilder.hasUsableTimeline(segmentOffsets)) {
+    ): HistoryReprocessPlanner.CutPlan {
+        HistoryReprocessPlanner.tryPlanFromTimeline(
+            segmentOffsets = segmentOffsets,
+            durationMs = durationMs,
+            policy = AsrPackPolicy.Default
+        )?.let { plan ->
             _state.update { it.copy(message = str(R.string.offline_read_audio)) }
-            val built = TimelineWindowBuilder.build(segmentOffsets, durationMs)
-            if (built.isNotEmpty()) return built
+            return plan
         }
+
         // VAD path (orphan / no timeline)
         _state.update {
             it.copy(message = str(R.string.offline_vad_progress, 0))
@@ -281,12 +279,24 @@ class ReprocessEngine(
             checkCancel()
             utts.add(utt)
         }
-        if (utts.isEmpty()) return emptyList()
-        return utts.mapIndexed { idx, utt ->
+        if (utts.isEmpty()) {
+            throw Exception(str(R.string.offline_no_pcm))
+        }
+        val windows = utts.mapIndexed { idx, utt ->
             val start = utt.offsetMs.coerceAtLeast(0L)
             val dur = pcmDurationMs(utt.pcm.size, utt.sampleRate)
             val end = (start + dur).coerceAtMost(durationMs).coerceAtLeast(start + 1)
             TimeWindow(startMs = start, endMs = end, index = idx)
+        }
+        return try {
+            HistoryReprocessPlanner.planFromWindows(
+                windows = windows,
+                durationMs = durationMs,
+                policy = AsrPackPolicy.Default,
+                source = HistoryReprocessPlanner.WindowSource.ExternalWindows
+            )
+        } catch (_: Exception) {
+            throw Exception(str(R.string.offline_no_pcm))
         }
     }
 
@@ -402,6 +412,7 @@ class ReprocessEngine(
         sampleRate: Int,
         settings: UserSettings
     ): String {
+        asrThrottle.await(settings.asrApiIntervalMs)
         val utt = UtteranceAudio(
             pcm = pcm,
             sampleRate = sampleRate,
@@ -471,27 +482,18 @@ class ReprocessEngine(
                 batchIdx = batchIdx,
                 batchTotal = batches.size
             )
-            for (i in batch.indices) {
-                val src = batch[i]
-                val zh = zhList[i].trim()
-                if (zh.isEmpty()) {
-                    throw Exception(
-                        str(R.string.offline_empty_translation) +
-                            " (#${done + i + 1})"
-                    )
+            try {
+                val batchSegs = HistoryReprocessText.bilingualSegments(batch, zhList)
+                out.addAll(batchSegs)
+                for (seg in batchSegs) {
+                    window.addLast(ContextTurn(seg.source, seg.translation))
+                    while (window.size > windowSize) window.removeFirst()
                 }
-                out.add(
-                    TranscriptSegment(
-                        source = src,
-                        translation = zh,
-                        cutReason = CutReason.Silence,
-                        incomplete = false,
-                        timestampMs = System.currentTimeMillis(),
-                        offsetMs = 0L
-                    )
+            } catch (e: IllegalArgumentException) {
+                throw Exception(
+                    str(R.string.offline_empty_translation) +
+                        " (#${done + 1}): ${e.message}"
                 )
-                window.addLast(ContextTurn(src, zh))
-                while (window.size > windowSize) window.removeFirst()
             }
             done += batch.size
         }
@@ -588,7 +590,7 @@ class ReprocessEngine(
             requireNonEmptySlots = true
         )
         val config = settings.toLlmConfig().copy(thinking = LlmThinkingMode.Disabled)
-        return collectChat(system, user, config)
+        return collectChat(system, user, config, settings.llmApiIntervalMs)
     }
 
     private suspend fun runTranslateOneWithRetry(
@@ -628,6 +630,7 @@ class ReprocessEngine(
         context: List<ContextTurn>,
         settings: UserSettings
     ): String {
+        llmThrottle.await(settings.llmApiIntervalMs)
         val config = settings.toLlmConfig().copy(thinking = LlmThinkingMode.Disabled)
         var zh = ""
         llm.translateStream(source, context, config).collect { ev ->
@@ -650,8 +653,10 @@ class ReprocessEngine(
     private suspend fun collectChat(
         system: String,
         user: String,
-        config: LlmConfig
+        config: LlmConfig,
+        intervalMs: Int = 0
     ): String {
+        llmThrottle.await(intervalMs)
         var zh = ""
         llm.chatStream(system, user, config).collect { ev ->
             when (ev) {

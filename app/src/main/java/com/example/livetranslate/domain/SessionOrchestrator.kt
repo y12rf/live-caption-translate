@@ -14,6 +14,7 @@ import com.example.livetranslate.data.history.ExportTextMode
 import com.example.livetranslate.data.history.HistoryExport
 import com.example.livetranslate.data.history.HistoryRepository
 import com.example.livetranslate.data.llm.LlmClient
+import com.example.livetranslate.data.network.ApiCallThrottle
 import com.example.livetranslate.data.network.NetworkErrors
 import com.example.livetranslate.data.network.NetworkMonitor
 import com.example.livetranslate.data.settings.SettingsRepository
@@ -46,6 +47,7 @@ import java.io.IOException
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicLong
+import kotlin.coroutines.coroutineContext
 
 data class LiveSessionUiState(
     val phase: SessionPhase = SessionPhase.Idle,
@@ -135,6 +137,8 @@ class SessionOrchestrator(
     private val parkedPcm = ParkedPcmStore(this.appContext)
     private val ffmpegConverter = FfmpegAudioConverter()
     private val fileSegmenter = FileAudioSegmenter(appContext = this.appContext)
+    private val asrThrottle = ApiCallThrottle()
+    private val llmThrottle = ApiCallThrottle()
 
     private val asrInFlight = AtomicInteger(0)
     private val llmInFlight = AtomicInteger(0)
@@ -467,12 +471,11 @@ class SessionOrchestrator(
             )
         }
 
-        // Wait for ASR/LLM backlog then save (same as drain stop)
+        // Wait for ASR **and** LLM (queues + in-flight + fail-list retries).
+        // Previously only pipelineBusy() was checked: ASR could finish while translations
+        // were still queued / failed into the fail list, then auto-stop saved early.
         val drained = withTimeoutOrNull(FILE_PIPELINE_TIMEOUT_MS) {
-            while (isActive && pipelineBusy()) {
-                delay(250)
-                publishQueueDepths()
-            }
+            awaitFilePipelineIdle()
             true
         }
         if (drained != true) {
@@ -487,6 +490,66 @@ class SessionOrchestrator(
             } finally {
                 suppressFileJobCancel.set(false)
             }
+        }
+    }
+
+    /**
+     * Block until the file-import pipeline is truly idle:
+     * - ASR/LLM memory queues + in-flight work drained
+     * - disk overflow pumped (when online)
+     * - fail-list items re-queued and re-attempted (LLM errors / full-queue salvage)
+     *
+     * Does **not** treat partial/incomplete segments without a fail-list entry as busy
+     * (those were intentionally adopted).
+     */
+    private suspend fun awaitFilePipelineIdle() {
+        var failRetryRounds = 0
+        while (coroutineContext.isActive) {
+            if (pipelineBusy()) {
+                delay(250)
+                publishQueueDepths()
+                val failN = synchronized(failLock) { failList.size }
+                val incomplete = _state.value.segments.count { it.incomplete }
+                _state.update {
+                    it.copy(
+                        importStatus = buildString {
+                            append("识别/翻译中…")
+                            append(" ASR ${it.asrQueueDepth}")
+                            append(" · LLM ${it.llmQueueDepth}")
+                            if (it.diskQueueDepth > 0) append(" · 磁盘 ${it.diskQueueDepth}")
+                            if (failN > 0) append(" · 待重试 $failN")
+                            if (incomplete > 0) append(" · 未完成句 $incomplete")
+                        }
+                    )
+                }
+                continue
+            }
+            // Queues quiet — re-drive fail list so we do not stop with untranslated lines
+            // just because ASR already finished.
+            val failN = synchronized(failLock) { failList.size }
+            if (failN > 0 && network.isOnline() && failRetryRounds < FILE_FAIL_RETRY_ROUNDS) {
+                failRetryRounds++
+                android.util.Log.i(
+                    TAG,
+                    "file pipeline: retry fail list round=$failRetryRounds n=$failN"
+                )
+                _state.update {
+                    it.copy(
+                        importStatus = "重试失败项（第 $failRetryRounds/$FILE_FAIL_RETRY_ROUNDS 轮，$failN 项）…"
+                    )
+                }
+                retryFailed(limit = Int.MAX_VALUE)
+                delay(400)
+                continue
+            }
+            if (failN > 0) {
+                android.util.Log.w(
+                    TAG,
+                    "file pipeline idle with $failN fail-list item(s) left " +
+                        "(online=${network.isOnline()} rounds=$failRetryRounds)"
+                )
+            }
+            return
         }
     }
 
@@ -627,9 +690,18 @@ class SessionOrchestrator(
                     if (network.isOnline()) {
                         pumpDiskIntoMemory()
                     }
-                    val drained = withTimeoutOrNull(DRAIN_TIMEOUT_MS) {
+                    // File import can still have a long LLM tail; live mic uses a short drain.
+                    val drainTimeoutMs =
+                        if (audio.sourceType == AudioSourceType.File) {
+                            FILE_PIPELINE_TIMEOUT_MS
+                        } else {
+                            DRAIN_TIMEOUT_MS
+                        }
+                    val drained = withTimeoutOrNull(drainTimeoutMs) {
                         while (isActive && pipelineBusy() && !drainAbort.get()) {
                             delay(200)
+                            // Keep pumping disk while waiting (file overflow is common).
+                            if (network.isOnline()) pumpDiskIntoMemory()
                         }
                         true
                     }
@@ -991,8 +1063,8 @@ class SessionOrchestrator(
         if (llmWorker?.isActive != true) {
             llmWorker = scope.launch {
                 for (job in translateQueue) {
-                    llmQueued.decrementAndGet()
-                    publishQueueDepths()
+                    // Do not decrement llmQueued here — processTranslateWithRetry claims
+                    // inFlight first, then decrements queued (no idle gap between jobs).
                     processTranslateWithRetry(job)
                 }
             }
@@ -1000,8 +1072,6 @@ class SessionOrchestrator(
         if (asrWorker?.isActive != true) {
             asrWorker = scope.launch {
                 for (utt in utteranceQueue) {
-                    asrQueued.decrementAndGet()
-                    publishQueueDepths()
                     processAsrWithRetry(utt)
                 }
             }
@@ -1012,6 +1082,9 @@ class SessionOrchestrator(
      * True while workers still have processable work.
      * Disk overflow is only "busy" when online (can be pumped); offline disk is preserved
      * across stop and must not block drain forever or be wiped on finalize.
+     *
+     * Note: fail-list is **not** counted here (live Stop should not hang forever on
+     * permanent errors). File import uses [awaitFilePipelineIdle] to re-drive fails.
      */
     private fun pipelineBusy(): Boolean =
         asrInFlight.get() > 0 ||
@@ -1063,7 +1136,11 @@ class SessionOrchestrator(
 
     private suspend fun processAsrWithRetry(utt: UtteranceAudio) {
         val gen = workerGeneration.get()
+        // Claim in-flight before releasing queued count — avoids a window where
+        // pipelineBusy() is false between dequeue and work start.
         asrInFlight.incrementAndGet()
+        asrQueued.decrementAndGet()
+        publishQueueDepths()
         _state.update {
             it.copy(
                 phase = phaseForWork(),
@@ -1096,26 +1173,16 @@ class SessionOrchestrator(
                         finishAsrOnly(localId, en)
                         return
                     }
-                    val window = settings.contextWindowSize
-                    llmQueued.incrementAndGet()
-                    val sent = translateQueue.trySend(
-                        PendingTranslate(utt.copy(pcm = ByteArray(0)), en, window, localId)
-                    )
-                    if (!sent.isSuccess) {
-                        llmQueued.decrementAndGet()
-                        val msg = "翻译队列已满"
-                        markSegmentFailed(localId, msg)
-                        pushFail(
-                            FailedWork.Llm(
-                                id = failIdGen.getAndIncrement(),
-                                utt = utt.copy(pcm = ByteArray(0)),
-                                en = en,
-                                windowSize = window,
-                                segmentLocalId = localId,
-                                message = msg
-                            )
+                    // Back-pressure: suspend when LLM queue is full instead of dumping
+                    // to fail-list (which made file import look "done" after ASR).
+                    enqueueTranslate(
+                        PendingTranslate(
+                            utt = utt.copy(pcm = ByteArray(0)),
+                            en = en,
+                            windowSize = settings.contextWindowSize,
+                            segmentLocalId = localId
                         )
-                    }
+                    )
                     return
                 } catch (e: CancellationException) {
                     salvageInFlightAsr(utt)
@@ -1141,9 +1208,52 @@ class SessionOrchestrator(
         }
     }
 
+    /**
+     * Enqueue LLM work with suspension back-pressure.
+     * Keeps [llmQueued] accurate for [pipelineBusy] while waiting for capacity.
+     */
+    private suspend fun enqueueTranslate(job: PendingTranslate) {
+        llmQueued.incrementAndGet()
+        publishQueueDepths()
+        try {
+            translateQueue.send(job)
+        } catch (e: CancellationException) {
+            llmQueued.decrementAndGet()
+            markSegmentFailed(job.segmentLocalId, "会话结束时翻译未入队")
+            pushFail(
+                FailedWork.Llm(
+                    id = failIdGen.getAndIncrement(),
+                    utt = job.utt,
+                    en = job.en,
+                    windowSize = job.windowSize,
+                    segmentLocalId = job.segmentLocalId,
+                    message = "会话结束时翻译未入队"
+                )
+            )
+            throw e
+        } catch (e: Exception) {
+            llmQueued.decrementAndGet()
+            val msg = "翻译队列已关闭：${e.message ?: e.javaClass.simpleName}"
+            markSegmentFailed(job.segmentLocalId, msg)
+            pushFail(
+                FailedWork.Llm(
+                    id = failIdGen.getAndIncrement(),
+                    utt = job.utt,
+                    en = job.en,
+                    windowSize = job.windowSize,
+                    segmentLocalId = job.segmentLocalId,
+                    message = msg
+                )
+            )
+        }
+    }
+
     private suspend fun processTranslateWithRetry(job: PendingTranslate) {
         val gen = workerGeneration.get()
+        // Claim in-flight before releasing queued count (same handoff rule as ASR).
         llmInFlight.incrementAndGet()
+        llmQueued.decrementAndGet()
+        publishQueueDepths()
         _state.update {
             it.copy(
                 phase = phaseForWork(),
@@ -1245,6 +1355,7 @@ class SessionOrchestrator(
             throw Exception("ASR API Key is empty. Configure it in Settings.")
         }
 
+        asrThrottle.await(settings.asrApiIntervalMs)
         var en = ""
         asr.transcribeStream(
             utt,
@@ -1301,6 +1412,7 @@ class SessionOrchestrator(
             throw Exception("LLM API Key is empty. Configure it in Settings.")
         }
 
+        llmThrottle.await(settings.llmApiIntervalMs)
         var zh = ""
         // Weak-net: shrink context when queues are deep
         val windowSize = if (weakNetworkPressure()) {
@@ -1486,6 +1598,7 @@ class SessionOrchestrator(
                     titleRequested.set(false)
                     return@launch
                 }
+                llmThrottle.await(settings.llmApiIntervalMs)
                 val title = withTimeout(TITLE_CALL_TIMEOUT_MS) {
                     llm.summarizeSessionTitle(segsSnapshot, settings.toLlmConfig())
                 }
@@ -1778,6 +1891,11 @@ class SessionOrchestrator(
         private const val AWAIT_ONLINE_TIMEOUT_MS = 120_000L
         /** Max wait after file VAD for ASR/LLM to finish before force-save. */
         private const val FILE_PIPELINE_TIMEOUT_MS = 30 * 60_000L
+        /**
+         * How many times file-import will re-drive the whole fail list after queues go idle.
+         * Each item still uses [MAX_ATTEMPTS] inside the worker.
+         */
+        private const val FILE_FAIL_RETRY_ROUNDS = 5
         private const val MAX_ATTEMPTS = 3
         private const val ASR_QUEUE_CAP = 12
         private const val LLM_QUEUE_CAP = 12

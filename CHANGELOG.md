@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.2.1-beta2
+
+- **Fix ASR stream merge wiping transcripts** (MIMO / pure-delta providers): short deltas that
+  are a prefix of the buffer no longer replace the whole utterance (looked like “lost first/last block”)
+- File import: wait for LLM + fail-list retries after ASR; LLM enqueue uses back-pressure
+- Settings: ASR / LLM API call interval (ms)
+- History reprocess: extract pure `HistoryReprocessPlanner` / `HistoryReprocessText`; engine uses them
+- Unit tests: AsrTextMerger MIMO-style deltas, reprocess ASR→LLM I/O contract, API throttle, planner
+- versionName **1.2.1-beta2** (versionCode 7)
+
 ## 1.2.1-beta
 
 - **Reprocess (scheme C′)**: replace `OfflineReprocessPipeline` with `ReprocessEngine`

@@ -329,6 +329,8 @@
     <string name="settings_info_offline_vad_batch">仅离线/重跑：每批打包进一次 ASR 请求的 VAD 句数上限（还会按约 30 秒时长强制切批，避免超长音频丢开头/复读）。</string>
     <string name="settings_info_title_threshold">满 N 句后尝试 LLM 会话标题（实时与文件导入）。</string>
     <string name="settings_info_max_attempts">单次 ASR/LLM 自动重试次数（1–10），指数退避。</string>
+    <string name="settings_info_asr_api_interval">相邻两次 ASR 请求发起之间的最小间隔（毫秒，0–60000）。0 = 不额外等待。实时 / 文件导入 / 重跑（含重试）均生效。</string>
+    <string name="settings_info_llm_api_interval">相邻两次 LLM 请求发起之间的最小间隔（毫秒，0–60000）。0 = 不额外等待。翻译、批量翻译与会话标题均生效（缓存命中不占用间隔）。</string>
     <string name="settings_info_translation_cache">相同原文→译文的会话内缓存。新会话开始时清空。</string>
     <string name="settings_info_keep_screen_on">开启后 Live 主界面保持常亮。</string>
     <string name="settings_info_immersive">在 Live 主界面隐藏状态栏/导航栏（边缘滑动可短暂显示）。完整双语沉浸页请点 Live 顶栏全屏按钮。</string>
@@ -338,10 +340,12 @@
     <string name="settings_title_user_prompt_title">标题 user prompt</string>
     <string name="settings_full_url_title">完整 URL</string>
     <string name="settings_pipeline">管线 / 离线</string>
-    <string name="settings_pipeline_info">历史事后重跑与离线打包：\n• VAD 批大小 — 每批 ASR 合并的 VAD 句数上限（默认 15；另硬限制约 30 秒 PCM）\n• 标题阈值 — 满 N 句后生成 LLM 标题\n• 网络重试 — ASR/LLM 自动重试次数\n• 翻译缓存 — 会话内缓存容量\n\n失败项软跳过，仍保存部分结果。\n主页文件导入走能量 VAD + 时间轴录音管线。</string>
+    <string name="settings_pipeline_info">历史事后重跑与离线打包：\n• VAD 批大小 — 每批 ASR 合并的 VAD 句数上限（默认 15；另硬限制约 30 秒 PCM）\n• 标题阈值 — 满 N 句后生成 LLM 标题\n• 网络重试 — ASR/LLM 自动重试次数\n• ASR/LLM 间隔 — 相邻请求最小间隔（毫秒）\n• 翻译缓存 — 会话内缓存容量\n\n失败项软跳过，仍保存部分结果。\n主页文件导入走能量 VAD + 时间轴录音管线。</string>
     <string name="settings_offline_vad_batch">离线 VAD 批大小（句/次 ASR）</string>
     <string name="settings_title_threshold">满 N 句后生成标题</string>
     <string name="settings_max_attempts">网络重试次数</string>
+    <string name="settings_asr_api_interval">ASR 调用间隔（毫秒）</string>
+    <string name="settings_llm_api_interval">LLM 调用间隔（毫秒）</string>
     <string name="settings_translation_cache">翻译缓存上限</string>
     <string name="settings_display">显示</string>
     <string name="settings_display_info">主界面选项：\n• 屏幕常亮 — 听讲时不熄屏\n• 隐藏系统栏 — 隐藏状态栏/导航栏（边缘滑出）\n• 只识别 — 识别但不翻译\n\n完整沉浸双语页请点 Live 顶栏全屏按钮进入。</string>

@@ -86,6 +86,16 @@ data class UserSettings(
     val titleTurnThreshold: Int = 10,
     /** ASR/LLM automatic retry attempts (1–10). */
     val maxNetworkAttempts: Int = 3,
+    /**
+     * Minimum gap between successive ASR request starts (ms).
+     * 0 = no extra delay. Helps avoid provider rate limits on file import / reprocess.
+     */
+    val asrApiIntervalMs: Int = 0,
+    /**
+     * Minimum gap between successive LLM request starts (ms), including title calls.
+     * 0 = no extra delay. Cache hits do not consume an interval slot.
+     */
+    val llmApiIntervalMs: Int = 0,
     /** In-session translation cache capacity (0 = disabled growth still allows put until clear). */
     val translationCacheMax: Int = 50,
     /** Keep screen awake on Live screen. */

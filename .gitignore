@@ -178,6 +178,13 @@ downloads/
 sample-audio/
 test-audio/
 
+# Project-root local diagnosis (session WAV/SRT, ASR dumps, one-off scripts)
+# Unit fixtures live under app/src/test/ — not this folder.
+/test/
+/test/**
+diag_asr_out/
+chunks_session_*/
+
 # Fastlane local output
 fastlane/screenshots/
 fastlane/report.xml

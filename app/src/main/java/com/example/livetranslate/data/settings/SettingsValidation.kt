@@ -49,6 +49,12 @@ object SettingsValidation {
         if (s.maxNetworkAttempts < 1 || s.maxNetworkAttempts > 10) {
             w += "Network retry attempts should be 1–10 (got ${s.maxNetworkAttempts})"
         }
+        if (s.asrApiIntervalMs < 0 || s.asrApiIntervalMs > 60_000) {
+            w += "ASR API interval ms should be 0–60000 (got ${s.asrApiIntervalMs})"
+        }
+        if (s.llmApiIntervalMs < 0 || s.llmApiIntervalMs > 60_000) {
+            w += "LLM API interval ms should be 0–60000 (got ${s.llmApiIntervalMs})"
+        }
         if (s.translationCacheMax < 0 || s.translationCacheMax > 500) {
             w += "Translation cache max should be 0–500 (got ${s.translationCacheMax})"
         }
@@ -111,6 +117,8 @@ object SettingsValidation {
             offlineVadBatchSize = s.offlineVadBatchSize.coerceIn(1, 200),
             titleTurnThreshold = s.titleTurnThreshold.coerceIn(1, 50),
             maxNetworkAttempts = s.maxNetworkAttempts.coerceIn(1, 10),
+            asrApiIntervalMs = s.asrApiIntervalMs.coerceIn(0, 60_000),
+            llmApiIntervalMs = s.llmApiIntervalMs.coerceIn(0, 60_000),
             translationCacheMax = s.translationCacheMax.coerceIn(0, 500),
             overlayMaxWidthDp = s.overlayMaxWidthDp.coerceIn(120, 2000),
             overlayMaxHeightDp = s.overlayMaxHeightDp.coerceIn(60, 800),

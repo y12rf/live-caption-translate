@@ -49,6 +49,8 @@ class SettingsRepository(private val context: Context) {
         val offlineVadBatchSize = intPreferencesKey("offline_vad_batch_size")
         val titleTurnThreshold = intPreferencesKey("title_turn_threshold")
         val maxNetworkAttempts = intPreferencesKey("max_network_attempts")
+        val asrApiIntervalMs = intPreferencesKey("asr_api_interval_ms")
+        val llmApiIntervalMs = intPreferencesKey("llm_api_interval_ms")
         val translationCacheMax = intPreferencesKey("translation_cache_max")
         val keepScreenOn = booleanPreferencesKey("keep_screen_on")
         val immersiveMode = booleanPreferencesKey("immersive_mode")
@@ -138,6 +140,8 @@ class SettingsRepository(private val context: Context) {
             offlineVadBatchSize = p[Keys.offlineVadBatchSize] ?: d.offlineVadBatchSize,
             titleTurnThreshold = p[Keys.titleTurnThreshold] ?: d.titleTurnThreshold,
             maxNetworkAttempts = p[Keys.maxNetworkAttempts] ?: d.maxNetworkAttempts,
+            asrApiIntervalMs = p[Keys.asrApiIntervalMs] ?: d.asrApiIntervalMs,
+            llmApiIntervalMs = p[Keys.llmApiIntervalMs] ?: d.llmApiIntervalMs,
             translationCacheMax = p[Keys.translationCacheMax] ?: d.translationCacheMax,
             keepScreenOn = p[Keys.keepScreenOn] ?: d.keepScreenOn,
             immersiveMode = p[Keys.immersiveMode] ?: d.immersiveMode,
@@ -203,6 +207,8 @@ class SettingsRepository(private val context: Context) {
         prefs[Keys.offlineVadBatchSize] = next.offlineVadBatchSize
         prefs[Keys.titleTurnThreshold] = next.titleTurnThreshold
         prefs[Keys.maxNetworkAttempts] = next.maxNetworkAttempts
+        prefs[Keys.asrApiIntervalMs] = next.asrApiIntervalMs
+        prefs[Keys.llmApiIntervalMs] = next.llmApiIntervalMs
         prefs[Keys.translationCacheMax] = next.translationCacheMax
         prefs[Keys.keepScreenOn] = next.keepScreenOn
         prefs[Keys.immersiveMode] = next.immersiveMode

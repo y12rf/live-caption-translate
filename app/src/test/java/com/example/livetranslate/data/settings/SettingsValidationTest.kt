@@ -28,4 +28,15 @@ class SettingsValidationTest {
         assertTrue(r.warnings.any { it.contains("ASR API key") })
         assertTrue(r.warnings.any { it.contains("LLM API key") })
     }
+
+    @Test
+    fun apiIntervalOutOfRange_clamps() {
+        val r = SettingsValidation.validate(
+            UserSettings(asrApiIntervalMs = -5, llmApiIntervalMs = 999_999)
+        )
+        assertTrue(r.sanitized.asrApiIntervalMs == 0)
+        assertTrue(r.sanitized.llmApiIntervalMs == 60_000)
+        assertTrue(r.warnings.any { it.contains("ASR API interval") })
+        assertTrue(r.warnings.any { it.contains("LLM API interval") })
+    }
 }
